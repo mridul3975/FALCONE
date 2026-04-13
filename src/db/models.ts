@@ -1,11 +1,38 @@
 import db from "./connection";
 
+function ensureUserTableColumns() {
+    const columns = db
+        .query("PRAGMA table_info(user)")
+        .all() as Array<{ name: string }>;
+    const columnNames = new Set(columns.map((column) => column.name.toLowerCase()));
+
+    if (!columnNames.has("name")) {
+        db.exec("ALTER TABLE user ADD COLUMN name TEXT");
+    }
+
+    if (!columnNames.has("emailverified")) {
+        db.exec("ALTER TABLE user ADD COLUMN emailVerified INTEGER");
+    }
+
+    if (!columnNames.has("image")) {
+        db.exec("ALTER TABLE user ADD COLUMN image TEXT");
+    }
+
+    if (!columnNames.has("createdat")) {
+        db.exec("ALTER TABLE user ADD COLUMN createdAt DATETIME DEFAULT CURRENT_TIMESTAMP");
+    }
+
+    if (!columnNames.has("updatedat")) {
+        db.exec("ALTER TABLE user ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP");
+    }
+}
+
 export function initDb() {
     // User table
     db.query(`
         CREATE TABLE IF NOT EXISTS USER(
         id TEXT PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
+        name TEXT UNIQUE NOT NULL,
         email TEXT UNIQUE NOT NULL,
         emailverified INTEGER,
         image TEXT,
@@ -49,12 +76,14 @@ export function initDb() {
     )`
     ).run();
 
+    ensureUserTableColumns();
+
     console.log("Database tables initialized.");
 
 }
 export interface User {
     id: string;
-    username: string;
+    name: string;
     email: string;
     passwordHash: string;
     createdAt: Date;
