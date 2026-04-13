@@ -10,6 +10,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "better-auth": "^1.6.2",
     "jsonwebtoken": "^9.0.3"
   },
   "scripts": {

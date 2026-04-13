@@ -7,8 +7,10 @@ export function initDb() {
         id TEXT PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
         email TEXT UNIQUE NOT NULL,
-        passwordHash TEXT NOT NULL,
-        createdat DATETIME DEFAULT CURRENT_TIMESTAMP
+        emailverified INTEGER,
+        image TEXT,
+        createdat DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedat DATETIME DEFAULT CURRENT_TIMESTAMP
     )`).run();
 
     // Room table
