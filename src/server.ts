@@ -1,19 +1,22 @@
-import { serve } from "bun";
+import { serve, type ServerWebSocket } from "bun";
 import { initDb } from "./db/models";
 import { auth } from "./auth/auth";
+import { messageRepo } from "./chat/messages.repo";
 
 // Initialize Database Schema
 initDb();
 
 const PORT = process.env.PORT || 3000;
 
-type websocketData = {
+type WSContext = {
     userId: string;
     username: string;
 };
+const activeClients = new Map<string, ServerWebSocket<WSContext>>();
 
-const server = serve<websocketData>({
+const server = serve<WSContext>({
     port: PORT,
+    hostname: "127.0.0.1",
     async fetch(req) {
         const url = new URL(req.url);
         if (url.pathname.startsWith("/api/auth")) {
@@ -48,16 +51,39 @@ const server = serve<websocketData>({
     },
     websocket: {
         open(ws) {
-            console.log(`🟢 ${ws.data.userId} (${ws.data.username}) connected!`);
-            ws.send(JSON.stringify({ type: "connected", message: "Welcome to ChatrIX!" }));
+            activeClients.set(ws.data.userId, ws);
+            console.log(`🟢 ${ws.data.userId} (${ws.data.username}) connected`);
+
+            ws.send(JSON.stringify({ type: "connected", message: `Welcome ${ws.data.username}!` }));
+
         },
         message(ws, message) {
-            console.log(`📩 Received from ${ws.data.userId} (${ws.data.username}): ${message}`);
-            ws.send(`Echo: ${message}`);
+            try {
+                const parsed = JSON.parse(message as string);
+                if (parsed.type === "chat_message") {
+                    const { to, text } = parsed;
+                    const savedMsg = messageRepo.savePrivateMessage(ws.data.userId, to, text);
+                    console.log(`💬 ${ws.data.username} sent a message to ${to}: "${text}"`);
+
+                    ws.send(JSON.stringify({ type: "ack", data: { messageId: savedMsg.id, status: "sent" } }));
+
+                    const receiverWS = activeClients.get(to);
+                    if (receiverWS) {
+                        receiverWS.send(JSON.stringify({
+                            type: "incoming_message",
+                            data: savedMsg
+                        }));
+                    }
+                }
+            } catch (err) {
+                ws.send(JSON.stringify({ type: "error", message: "Invalid JSON format" }));
+            }
         },
-        close(_ws, _code, _message) {
-            console.log(`🔴 ${_ws.data.userId} (${_ws.data.username}) disconnected`);
+        close(ws) {
+            activeClients.delete(ws.data.userId);
+            console.log(`🔴 ${ws.data.userId} (${ws.data.username}) disconnected`);
         },
     },
 });
+console.log(`🚀 ChatrIX Server running at http://${server.hostname}:${server.port}`);
 
