@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import db from "../db/connection";
+import { bearer } from "better-auth/plugins/bearer";
 
 export const auth = betterAuth({
     database: db,
@@ -7,6 +8,7 @@ export const auth = betterAuth({
     emailAndPassword: {
         enabled: true,
     },
+    plugins: [bearer()],
     trustedOrigins: ["http://localhost:3000"],
 });
 
