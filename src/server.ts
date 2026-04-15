@@ -58,15 +58,36 @@ const server = serve<WSContext>({
 
         },
         message(ws, message) {
-            try {
-                const parsed = JSON.parse(message as string);
-                if (parsed.type === "chat_message") {
-                    const { to, text } = parsed;
-                    const savedMsg = messageRepo.savePrivateMessage(ws.data.userId, to, text);
-                    console.log(`💬 ${ws.data.username} sent a message to ${to}: "${text}"`);
+            // 1. Safely convert Buffer to String
+            const msgString = typeof message === "string"
+                ? message
+                : new TextDecoder().decode(message as Uint8Array);
 
+            try {
+                // 2. Parse the JSON
+                const parsed = JSON.parse(msgString);
+                console.log(`\n📩 Incoming JSON from ${ws.data.username}:`, parsed);
+
+                if (parsed.type === "chat_message") {
+
+                    // 3. FOOLPROOF EXTRACTION: Check inside `data`, but also check the root level just in case!
+                    const to = parsed.data?.to || parsed.to;
+                    const text = parsed.data?.text || parsed.text;
+
+                    // 4. If they are STILL undefined, stop and throw an error back to Postman!
+                    if (!to || !text) {
+                        console.log("❌ Missing 'to' or 'text' in the JSON!", parsed);
+                        ws.send(JSON.stringify({ type: "error", message: "Your JSON is missing 'to' or 'text'." }));
+                        return;
+                    }
+
+                    // 5. Save it to the database!
+                    const savedMsg = messageRepo.savePrivateMessage(ws.data.userId, to, text);
+
+                    // 6. Send success ACK to sender
                     ws.send(JSON.stringify({ type: "ack", data: { messageId: savedMsg.id, status: "sent" } }));
 
+                    // 7. Forward to receiver if they are online
                     const receiverWS = activeClients.get(to);
                     if (receiverWS) {
                         receiverWS.send(JSON.stringify({
@@ -76,6 +97,7 @@ const server = serve<WSContext>({
                     }
                 }
             } catch (err) {
+                console.error("❌ JSON Parse Error:", err);
                 ws.send(JSON.stringify({ type: "error", message: "Invalid JSON format" }));
             }
         },
