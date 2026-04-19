@@ -43,5 +43,22 @@ export const messageRepo = {
         }
 
         return { id, senderId, receiverId, roomId: null, text, status, timestamp };
+    },
+    getConversation: (userId: string, otherUserId: string): ChatMessage[] => {
+        try {
+            console.log(`🔍 Querying conversation between ${userId} and ${otherUserId}`);
+            const query = db.query(`
+            SELECT * FROM messages
+            WHERE (senderId = ? AND receiverId = ?)
+               OR (senderId = ? AND receiverId = ?)
+            ORDER BY timestamp ASC
+        `);
+            const results = query.all(userId, otherUserId, otherUserId, userId) as ChatMessage[];
+            console.log(`📨 Found ${results.length} messages:`, results);
+            return results;
+        } catch (error) {
+            console.error("❌ DB Query Error:", error);
+            throw error;
+        }
     }
 };

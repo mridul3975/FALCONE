@@ -1,7 +1,8 @@
-import { serve, type ServerWebSocket } from "bun";
+import { serve } from "bun";
 import { initDb } from "./db/models";
 import { auth } from "./auth/auth";
 import { messageRepo } from "./chat/messages.repo";
+import db from "./db/connection";
 
 // Initialize Database Schema
 initDb();
@@ -45,6 +46,31 @@ const server = serve<WSContext>({
                 headers: { "Content-Type": "application/json" },
             });
         }
+
+        if (url.pathname.startsWith("/api/messages/")) {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+            const pathParts = url.pathname.split("/").filter(Boolean);
+            const otherUserId = pathParts[pathParts.length - 1];
+
+            // --- 🚨 ADD THESE DEBUG LOGS ---
+            console.log(`\n🔍 DEBUG: Fetching history between Me(${session.user.id}) and Them(${otherUserId})`);
+
+
+
+            if (!otherUserId) {
+                return new Response("Bad Request: Missing other user ID", { status: 400 });
+            }
+            const history = messageRepo.getConversation(session.user.id, otherUserId);
+            return new Response(JSON.stringify(history), {
+                headers: { "Content-Type": "application/json" },
+            });
+        }
+
         return new Response("Not Found", { status: 404 });
     },
     websocket: {
@@ -72,19 +98,19 @@ const server = serve<WSContext>({
                 if (parsed.type === "chat-message") {
                     const to = parsed.data.to || parsed.to; // recipient userId
                     const text = parsed.data.text || parsed.text;
-                    if (!to && !text) {
+                    if (!to || !text) {
                         ws.send(JSON.stringify({ type: "error", message: "Invalid message format" }));
                         return;
                     }
-                
-                    const savedMsg = messageRepo.savePrivateMessage(ws.data.userId, to, text );
+
+                    const savedMsg = messageRepo.savePrivateMessage(ws.data.userId, to, text);
                     ws.send(JSON.stringify({ type: "ack", data: { messageId: savedMsg.id, status: "sent" } }));
 
                     server.publish(to, JSON.stringify({
                         type: "chat-message",
                         data: savedMsg
                     }));
-                } 
+                }
             } catch (err) {
                 if (err instanceof SyntaxError) {
                     ws.send(JSON.stringify({ type: "error", message: "Malformed JSON payload" }));
@@ -99,6 +125,6 @@ const server = serve<WSContext>({
             ws.unsubscribe(ws.data.userId);
             console.log(`User ${ws.data.username} disconnected`);
         }
-        },
-        });
+    },
+});
 console.log(`🚀 ChatrIX Server running at http://${server.hostname}:${server.port}`);
