@@ -3,6 +3,7 @@ import { initDb } from "./db/models";
 import { auth } from "./auth/auth";
 import { messageRepo } from "./chat/messages.repo";
 import { roomRepo } from "./chat/rooms.repo";
+import { getRoomMessages } from "./chat/rooms.repo";
 
 // Initialize Database Schema
 initDb();
@@ -101,6 +102,29 @@ const server = serve<WSContext>({
             return new Response(JSON.stringify(newRoom), {
                 headers: { "Content-Type": "application/json" },
             });
+        }
+
+        const roomMessageMatch = url.pathname.match(/^\/api\/rooms\/([^\/]+)\/messages$/);
+        if (roomMessageMatch && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+            const roomId = roomMessageMatch[1];
+            if (!roomId) {
+                return new Response("Bad Request: Missing room ID", { status: 400 });
+            }
+            try {
+                const messages = getRoomMessages(roomId);
+                return new Response(JSON.stringify(messages), {
+                    headers: { "Content-Type": "application/json" },
+                });
+            } catch (error) {
+                console.error("❌ Error fetching room messages:", error);
+                return new Response("Internal Server Error", { status: 500 });
+            }
         }
 
         return new Response("Not Found", { status: 404 });

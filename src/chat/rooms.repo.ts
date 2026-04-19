@@ -48,3 +48,20 @@ export const roomRepo = {
         return { id, senderId, receiverId: null, roomId, text, status, timestamp };
     }
 };
+
+export function getRoomMessages(roomId: string, limit = 100) {
+    try {
+        const query = db.query(`
+            SELECT 
+                m.id, m.senderId, m.roomId, m.text, m.status, m.timestamp
+            FROM messages m
+            WHERE m.roomId = $roomId
+            ORDER BY m.timestamp ASC
+            LIMIT $limit
+        `);
+        return query.all({ $roomId: roomId, $limit: limit });
+    } catch (error) {
+        console.error("❌ Error fetching room messages:", error);
+        throw error;
+    }
+}
