@@ -2,7 +2,7 @@ import { serve } from "bun";
 import { initDb } from "./db/models";
 import { auth } from "./auth/auth";
 import { messageRepo } from "./chat/messages.repo";
-import db from "./db/connection";
+import { roomRepo } from "./chat/rooms.repo";
 
 // Initialize Database Schema
 initDb();
@@ -71,6 +71,38 @@ const server = serve<WSContext>({
             });
         }
 
+        if (url.pathname === "/api/rooms" && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+            const rooms = roomRepo.getAllRooms();
+            return new Response(JSON.stringify(rooms), {
+                headers: { "Content-Type": "application/json" },
+            });
+        }
+
+        if (url.pathname === "/api/rooms/create" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+
+            const body = (await req.json()) as { name?: string } | null;
+            if (!body || typeof body.name !== "string" || !body.name.trim()) {
+                return new Response("Bad Request: Missing room name", { status: 400 });
+            }
+
+            const newRoom = roomRepo.createRoom(body.name.trim());
+            return new Response(JSON.stringify(newRoom), {
+                headers: { "Content-Type": "application/json" },
+            });
+        }
+
         return new Response("Not Found", { status: 404 });
     },
     websocket: {
@@ -111,13 +143,45 @@ const server = serve<WSContext>({
                         data: savedMsg
                     }));
                 }
-            } catch (err) {
-                if (err instanceof SyntaxError) {
-                    ws.send(JSON.stringify({ type: "error", message: "Malformed JSON payload" }));
+                // --- JOIN A ROOM ---
+                if (parsed.type === "room_join") {
+                    const roomId = parsed.data?.roomId || parsed.roomId;
+                    if (!roomId) {
+                        ws.send(JSON.stringify({ type: "error", message: "Missing roomId" }));
+                        return;
+                    }
+
+                    ws.subscribe(roomId); // Bun's native PubSub makes this ONE LINE!
+                    console.log(`📢 ${ws.data.username} joined room ${roomId}`);
+                    ws.send(JSON.stringify({ type: "system", message: `Successfully joined room ${roomId}` }));
                     return;
                 }
 
-                console.error("Error processing message:", err);
+                // --- SEND MESSAGE TO A ROOM ---
+                if (parsed.type === "room_message") {
+                    const roomId = parsed.data?.roomId || parsed.roomId;
+                    const text = parsed.data?.text || parsed.text;
+
+                    if (!roomId || !text) {
+                        ws.send(JSON.stringify({ type: "error", message: "Invalid room message format" }));
+                        return;
+                    }
+
+                    // Save it to the DB
+                    const savedMsg = roomRepo.saveRoomMessage(ws.data.userId, roomId, text);
+
+                    // Ack back to the sender
+                    ws.send(JSON.stringify({ type: "ack", data: { messageId: savedMsg.id, status: "sent" } }));
+
+                    // Broadcast to EVERYONE subscribed to this room!
+                    server.publish(roomId, JSON.stringify({
+                        type: "room_message",
+                        data: savedMsg
+                    }));
+                    return;
+                }
+            } catch (error) {
+                console.error("Error processing message:", error);
                 ws.send(JSON.stringify({ type: "error", message: "Failed to process message" }));
             }
         },
