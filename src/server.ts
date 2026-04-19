@@ -12,7 +12,6 @@ type WSContext = {
     userId: string;
     username: string;
 };
-const activeClients = new Map<string, ServerWebSocket<WSContext>>();
 
 const server = serve<WSContext>({
     port: PORT,
@@ -23,7 +22,6 @@ const server = serve<WSContext>({
             return auth.handler(req);
         }
         if (url.pathname === "/chat") {
-
             const session = await auth.api.getSession({
                 headers: req.headers,
             });
@@ -51,61 +49,56 @@ const server = serve<WSContext>({
     },
     websocket: {
         open(ws) {
-            activeClients.set(ws.data.userId, ws);
-            console.log(`🟢 ${ws.data.userId} (${ws.data.username}) connected`);
-
-            ws.send(JSON.stringify({ type: "connected", message: `Welcome ${ws.data.username}!` }));
-
+            ws.subscribe(ws.data.userId); // Subscribe to a channel specific to the user
+            console.log(`User ${ws.data.username} connected with ID ${ws.data.userId}`);
+            ws.send(JSON.stringify({ type: "welcome", message: `Welcome ${ws.data.username}!` }));
         },
         message(ws, message) {
-            // 1. Safely convert Buffer to String
-            const msgString = typeof message === "string"
-                ? message
-                : new TextDecoder().decode(message as Uint8Array);
+            const msgString = (typeof message === "string" ? message : new TextDecoder().decode(message)).trim();
+
+            // Ignore keepalive or empty websocket frames.
+            if (!msgString) {
+                return;
+            }
 
             try {
-                // 2. Parse the JSON
                 const parsed = JSON.parse(msgString);
-                console.log(`\n📩 Incoming JSON from ${ws.data.username}:`, parsed);
+                if (typeof parsed !== "object" || parsed === null) {
+                    ws.send(JSON.stringify({ type: "error", message: "Invalid message payload" }));
+                    return;
+                }
 
-                if (parsed.type === "chat_message") {
-
-                    // 3. FOOLPROOF EXTRACTION: Check inside `data`, but also check the root level just in case!
-                    const to = parsed.data?.to || parsed.to;
-                    const text = parsed.data?.text || parsed.text;
-
-                    // 4. If they are STILL undefined, stop and throw an error back to Postman!
-                    if (!to || !text) {
-                        console.log("❌ Missing 'to' or 'text' in the JSON!", parsed);
-                        ws.send(JSON.stringify({ type: "error", message: "Your JSON is missing 'to' or 'text'." }));
+                console.log(`Received message from ${ws.data.username}:`, parsed);
+                if (parsed.type === "chat-message") {
+                    const to = parsed.data.to || parsed.to; // recipient userId
+                    const text = parsed.data.text || parsed.text;
+                    if (!to && !text) {
+                        ws.send(JSON.stringify({ type: "error", message: "Invalid message format" }));
                         return;
                     }
-
-                    // 5. Save it to the database!
-                    const savedMsg = messageRepo.savePrivateMessage(ws.data.userId, to, text);
-
-                    // 6. Send success ACK to sender
+                
+                    const savedMsg = messageRepo.savePrivateMessage(ws.data.userId, to, text );
                     ws.send(JSON.stringify({ type: "ack", data: { messageId: savedMsg.id, status: "sent" } }));
 
-                    // 7. Forward to receiver if they are online
-                    const receiverWS = activeClients.get(to);
-                    if (receiverWS) {
-                        receiverWS.send(JSON.stringify({
-                            type: "incoming_message",
-                            data: savedMsg
-                        }));
-                    }
-                }
+                    server.publish(to, JSON.stringify({
+                        type: "chat-message",
+                        data: savedMsg
+                    }));
+                } 
             } catch (err) {
-                console.error("❌ JSON Parse Error:", err);
-                ws.send(JSON.stringify({ type: "error", message: "Invalid JSON format" }));
+                if (err instanceof SyntaxError) {
+                    ws.send(JSON.stringify({ type: "error", message: "Malformed JSON payload" }));
+                    return;
+                }
+
+                console.error("Error processing message:", err);
+                ws.send(JSON.stringify({ type: "error", message: "Failed to process message" }));
             }
         },
         close(ws) {
-            activeClients.delete(ws.data.userId);
-            console.log(`🔴 ${ws.data.userId} (${ws.data.username}) disconnected`);
+            ws.unsubscribe(ws.data.userId);
+            console.log(`User ${ws.data.username} disconnected`);
+        }
         },
-    },
-});
+        });
 console.log(`🚀 ChatrIX Server running at http://${server.hostname}:${server.port}`);
-
