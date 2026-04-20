@@ -80,7 +80,7 @@ export default function DashboardPage() {
 
     return (
         <main className="min-h-screen bg-[#d9d9d9] font-['Courier_New',monospace] text-black">
-            <div className="mx-auto hidden min-h-screen w-full max-w-305 overflow-hidden border-2 border-[#5f5cf0] bg-[#d9d9d9] lg:block">
+            <div className="hidden min-h-screen w-full overflow-hidden border-2 border-black bg-[#d9d9d9] lg:block">
                 <header className="flex items-center justify-between border-b-[3px] border-black px-5 py-3">
                     <div className="flex items-center gap-3">
                         <AvatarIcon />
@@ -98,7 +98,7 @@ export default function DashboardPage() {
                     </button>
                 </header>
 
-                <div className="grid min-h-175 grid-cols-[270px_1fr]">
+                <div className="grid h-[calc(100vh-74px)] grid-cols-[270px_1fr]">
                     <aside className="border-r-[3px] border-black px-4 py-4">
                         <div className="mb-6 border-b-2 border-black pb-3">
                             <p className="text-[34px] font-black leading-none">ChatrIX</p>
@@ -140,7 +140,7 @@ export default function DashboardPage() {
                         </div>
                     </aside>
 
-                    <section className="px-8 py-6">
+                    <section className="flex h-full flex-col px-8 py-6">
                         <div className="border-l-[6px] border-black pl-4">
                             <h1 className="text-[72px] font-black uppercase leading-none">Chats</h1>
                             <p className="mt-3 text-[26px] font-bold uppercase tracking-tight">Select a conversation to start messaging.</p>
@@ -165,7 +165,7 @@ export default function DashboardPage() {
                             </button>
                         </div>
 
-                        <div className="mt-8 flex items-center justify-between border-t-2 border-black pt-4">
+                        <div className="mt-auto flex items-center justify-between border-t-2 border-black pt-4">
                             <div className="flex items-center gap-3 text-[13px] font-black uppercase">
                                 <span className="border-[3px] border-black bg-black px-2 py-1 text-white">Connected ✓</span>
                                 <span className="border-2 border-black bg-white px-2 py-1">V 1.0.42-Stable</span>

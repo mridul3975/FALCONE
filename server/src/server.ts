@@ -5,6 +5,7 @@ import { messageRepo } from "./chat/messages.repo";
 import { roomRepo } from "./chat/rooms.repo";
 import { getRoomMessages } from "./chat/rooms.repo";
 import { networkInterfaces } from "node:os";
+import db from "./db/connection";
 
 // Initialize Database Schema
 initDb();
@@ -126,6 +127,40 @@ const server = serve<WSContext>({
             return new Response(JSON.stringify({ status: "ok" }), {
                 headers: { "Content-Type": "application/json" },
             });
+        }
+
+        if (url.pathname === "/api/users" && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+
+            const users = db
+                .query(
+                    `
+                        SELECT id, name, email, image
+                        FROM user
+                        WHERE id != $currentUserId
+                        ORDER BY createdAt DESC
+                        LIMIT 50
+                    `,
+                )
+                .all({ currentUserId: session.user.id }) as Array<{
+                    id: string;
+                    name: string;
+                    email: string;
+                    image: string | null;
+                }>;
+
+            return withCors(
+                req,
+                new Response(JSON.stringify(users), {
+                    headers: { "Content-Type": "application/json" },
+                }),
+            );
         }
 
         if (url.pathname.startsWith("/api/messages/")) {
