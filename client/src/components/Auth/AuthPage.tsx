@@ -43,7 +43,7 @@ export default function AuthPage({
                         M
                     </span>
                     <span className="font-serif text-[34px] font-semibold italic tracking-[0.16em] text-[#FFF8E6]">
-                        MONOLITH
+                        CHATRIX
                     </span>
                 </header>
 

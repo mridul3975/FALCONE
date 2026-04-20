@@ -4,6 +4,7 @@ import { auth } from "./auth/auth";
 import { messageRepo } from "./chat/messages.repo";
 import { roomRepo } from "./chat/rooms.repo";
 import { getRoomMessages } from "./chat/rooms.repo";
+import { networkInterfaces } from "node:os";
 
 // Initialize Database Schema
 initDb();
@@ -11,14 +12,27 @@ initDb();
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
 
-const defaultAllowedOrigins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:5174",
-    "http://127.0.0.1:5174",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-];
+const DEV_CLIENT_PORTS = [3000, 4173, 5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180];
+
+function getLocalIPv4Hosts(): string[] {
+    const interfaces = networkInterfaces();
+    const hosts: string[] = [];
+
+    for (const netInterface of Object.values(interfaces)) {
+        for (const net of netInterface ?? []) {
+            if (net.family === "IPv4" && !net.internal) {
+                hosts.push(net.address);
+            }
+        }
+    }
+
+    return hosts;
+}
+
+const defaultHosts = ["localhost", "127.0.0.1", ...getLocalIPv4Hosts()];
+const defaultAllowedOrigins = defaultHosts.flatMap((host) =>
+    DEV_CLIENT_PORTS.map((port) => `http://${host}:${port}`),
+);
 
 const envAllowedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
     .split(",")
