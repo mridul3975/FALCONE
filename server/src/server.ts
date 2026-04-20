@@ -1,0 +1,218 @@
+import { serve } from "bun";
+import { initDb } from "./db/models";
+import { auth } from "./auth/auth";
+import { messageRepo } from "./chat/messages.repo";
+import { roomRepo } from "./chat/rooms.repo";
+import { getRoomMessages } from "./chat/rooms.repo";
+
+// Initialize Database Schema
+initDb();
+
+const PORT = process.env.PORT || 3000;
+
+type WSContext = {
+    userId: string;
+    username: string;
+};
+
+const server = serve<WSContext>({
+    port: PORT,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname.startsWith("/api/auth")) {
+            return auth.handler(req);
+        }
+        if (url.pathname === "/chat") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+
+            const upgraded = server.upgrade(req, {
+                data: {
+                    userId: session.user.id,
+                    username: session.user.name
+                }
+            });
+            if (!upgraded) {
+                return new Response("WebSocket upgrade failed", { status: 400 });
+            }
+            return;
+        }
+        if (url.pathname === "/health") {
+            return new Response(JSON.stringify({ status: "ok" }), {
+                headers: { "Content-Type": "application/json" },
+            });
+        }
+
+        if (url.pathname.startsWith("/api/messages/")) {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+            const pathParts = url.pathname.split("/").filter(Boolean);
+            const otherUserId = pathParts[pathParts.length - 1];
+
+            // --- 🚨 ADD THESE DEBUG LOGS ---
+            console.log(`\n🔍 DEBUG: Fetching history between Me(${session.user.id}) and Them(${otherUserId})`);
+
+
+
+            if (!otherUserId) {
+                return new Response("Bad Request: Missing other user ID", { status: 400 });
+            }
+            const history = messageRepo.getConversation(session.user.id, otherUserId);
+            return new Response(JSON.stringify(history), {
+                headers: { "Content-Type": "application/json" },
+            });
+        }
+
+        if (url.pathname === "/api/rooms" && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+            const rooms = roomRepo.getAllRooms();
+            return new Response(JSON.stringify(rooms), {
+                headers: { "Content-Type": "application/json" },
+            });
+        }
+
+        if (url.pathname === "/api/rooms/create" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+
+            const body = (await req.json()) as { name?: string } | null;
+            if (!body || typeof body.name !== "string" || !body.name.trim()) {
+                return new Response("Bad Request: Missing room name", { status: 400 });
+            }
+
+            const newRoom = roomRepo.createRoom(body.name.trim());
+            return new Response(JSON.stringify(newRoom), {
+                headers: { "Content-Type": "application/json" },
+            });
+        }
+
+        const roomMessageMatch = url.pathname.match(/^\/api\/rooms\/([^\/]+)\/messages$/);
+        if (roomMessageMatch && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return new Response("Unauthorized", { status: 401 });
+            }
+            const roomId = roomMessageMatch[1];
+            if (!roomId) {
+                return new Response("Bad Request: Missing room ID", { status: 400 });
+            }
+            try {
+                const messages = getRoomMessages(roomId);
+                return new Response(JSON.stringify(messages), {
+                    headers: { "Content-Type": "application/json" },
+                });
+            } catch (error) {
+                console.error("❌ Error fetching room messages:", error);
+                return new Response("Internal Server Error", { status: 500 });
+            }
+        }
+
+        return new Response("Not Found", { status: 404 });
+    },
+    websocket: {
+        open(ws) {
+            ws.subscribe(ws.data.userId); // Subscribe to a channel specific to the user
+            console.log(`User ${ws.data.username} connected with ID ${ws.data.userId}`);
+            ws.send(JSON.stringify({ type: "welcome", message: `Welcome ${ws.data.username}!` }));
+        },
+        message(ws, message) {
+            const msgString = (typeof message === "string" ? message : new TextDecoder().decode(message)).trim();
+
+            // Ignore keepalive or empty websocket frames.
+            if (!msgString) {
+                return;
+            }
+
+            try {
+                const parsed = JSON.parse(msgString);
+                if (typeof parsed !== "object" || parsed === null) {
+                    ws.send(JSON.stringify({ type: "error", message: "Invalid message payload" }));
+                    return;
+                }
+
+                console.log(`Received message from ${ws.data.username}:`, parsed);
+                if (parsed.type === "chat-message") {
+                    const to = parsed.data.to || parsed.to; // recipient userId
+                    const text = parsed.data.text || parsed.text;
+                    if (!to || !text) {
+                        ws.send(JSON.stringify({ type: "error", message: "Invalid message format" }));
+                        return;
+                    }
+
+                    const savedMsg = messageRepo.savePrivateMessage(ws.data.userId, to, text);
+                    ws.send(JSON.stringify({ type: "ack", data: { messageId: savedMsg.id, status: "sent" } }));
+
+                    server.publish(to, JSON.stringify({
+                        type: "chat-message",
+                        data: savedMsg
+                    }));
+                }
+                // --- JOIN A ROOM ---
+                if (parsed.type === "room_join") {
+                    const roomId = parsed.data?.roomId || parsed.roomId;
+                    if (!roomId) {
+                        ws.send(JSON.stringify({ type: "error", message: "Missing roomId" }));
+                        return;
+                    }
+
+                    ws.subscribe(roomId); // Bun's native PubSub makes this ONE LINE!
+                    console.log(`📢 ${ws.data.username} joined room ${roomId}`);
+                    ws.send(JSON.stringify({ type: "system", message: `Successfully joined room ${roomId}` }));
+                    return;
+                }
+
+                // --- SEND MESSAGE TO A ROOM ---
+                if (parsed.type === "room_message") {
+                    const roomId = parsed.data?.roomId || parsed.roomId;
+                    const text = parsed.data?.text || parsed.text;
+
+                    if (!roomId || !text) {
+                        ws.send(JSON.stringify({ type: "error", message: "Invalid room message format" }));
+                        return;
+                    }
+
+                    // Save it to the DB
+                    const savedMsg = roomRepo.saveRoomMessage(ws.data.userId, roomId, text);
+
+                    // Ack back to the sender
+                    ws.send(JSON.stringify({ type: "ack", data: { messageId: savedMsg.id, status: "sent" } }));
+
+                    // Broadcast to EVERYONE subscribed to this room!
+                    server.publish(roomId, JSON.stringify({
+                        type: "room_message",
+                        data: savedMsg
+                    }));
+                    return;
+                }
+            } catch (error) {
+                console.error("Error processing message:", error);
+                ws.send(JSON.stringify({ type: "error", message: "Failed to process message" }));
+            }
+        },
+        close(ws) {
+            ws.unsubscribe(ws.data.userId);
+            console.log(`User ${ws.data.username} disconnected`);
+        }
+    },
+});
+console.log(`🚀 ChatrIX Server running at http://${server.hostname}:${server.port}`);
