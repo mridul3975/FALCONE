@@ -1,7 +1,11 @@
 import { createAuthClient } from "better-auth/react";
 
+const authBaseURL =
+    import.meta.env.VITE_AUTH_BASE_URL ??
+    `${window.location.protocol}//${window.location.hostname}:3000`;
+
 export const authClient = createAuthClient({
-    baseURL: "http://localhost:3000"
+    baseURL: authBaseURL,
 });
 
 // We can export useful hooks directly

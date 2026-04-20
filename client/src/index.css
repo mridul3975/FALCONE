@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
-  @apply bg-black text-zinc-100; /* Default theme from your PRD */
+  margin: 0;
+  @apply bg-black text-zinc-100 antialiased;
 }

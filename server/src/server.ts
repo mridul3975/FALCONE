@@ -9,6 +9,59 @@ import { getRoomMessages } from "./chat/rooms.repo";
 initDb();
 
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
+
+const defaultAllowedOrigins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+];
+
+const envAllowedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+const allowedOrigins = new Set([...defaultAllowedOrigins, ...envAllowedOrigins]);
+
+function buildCorsHeaders(req: Request): Headers {
+    const headers = new Headers();
+    const origin = req.headers.get("origin");
+    const isAllowedOrigin = origin !== null && allowedOrigins.has(origin);
+
+    if (isAllowedOrigin && origin) {
+        headers.set("Access-Control-Allow-Origin", origin);
+        headers.set("Vary", "Origin");
+        headers.set("Access-Control-Allow-Credentials", "true");
+    }
+
+    const requestedHeaders = req.headers.get("access-control-request-headers");
+    headers.set("Access-Control-Allow-Headers", requestedHeaders ?? "Content-Type, Authorization");
+    headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    headers.set("Access-Control-Max-Age", "86400");
+
+    return headers;
+}
+
+function withCors(req: Request, res: Response): Response {
+    const corsHeaders = buildCorsHeaders(req);
+
+    if (!corsHeaders.has("Access-Control-Allow-Origin")) {
+        return res;
+    }
+
+    const headers = new Headers(res.headers);
+    corsHeaders.forEach((value, key) => headers.set(key, value));
+
+    return new Response(res.body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers,
+    });
+}
 
 type WSContext = {
     userId: string;
@@ -17,11 +70,24 @@ type WSContext = {
 
 const server = serve<WSContext>({
     port: PORT,
-    hostname: "127.0.0.1",
+    hostname: HOST,
     async fetch(req) {
         const url = new URL(req.url);
+
+        if (req.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+            const origin = req.headers.get("origin");
+            if (origin && !allowedOrigins.has(origin)) {
+                return new Response("CORS origin not allowed", { status: 403 });
+            }
+            return new Response(null, {
+                status: 204,
+                headers: buildCorsHeaders(req),
+            });
+        }
+
         if (url.pathname.startsWith("/api/auth")) {
-            return auth.handler(req);
+            const authResponse = await auth.handler(req);
+            return withCors(req, authResponse);
         }
         if (url.pathname === "/chat") {
             const session = await auth.api.getSession({
@@ -53,7 +119,7 @@ const server = serve<WSContext>({
                 headers: req.headers,
             });
             if (!session) {
-                return new Response("Unauthorized", { status: 401 });
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
             }
             const pathParts = url.pathname.split("/").filter(Boolean);
             const otherUserId = pathParts[pathParts.length - 1];
@@ -64,12 +130,12 @@ const server = serve<WSContext>({
 
 
             if (!otherUserId) {
-                return new Response("Bad Request: Missing other user ID", { status: 400 });
+                return withCors(req, new Response("Bad Request: Missing other user ID", { status: 400 }));
             }
             const history = messageRepo.getConversation(session.user.id, otherUserId);
-            return new Response(JSON.stringify(history), {
+            return withCors(req, new Response(JSON.stringify(history), {
                 headers: { "Content-Type": "application/json" },
-            });
+            }));
         }
 
         if (url.pathname === "/api/rooms" && req.method === "GET") {
@@ -77,12 +143,12 @@ const server = serve<WSContext>({
                 headers: req.headers,
             });
             if (!session) {
-                return new Response("Unauthorized", { status: 401 });
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
             }
             const rooms = roomRepo.getAllRooms();
-            return new Response(JSON.stringify(rooms), {
+            return withCors(req, new Response(JSON.stringify(rooms), {
                 headers: { "Content-Type": "application/json" },
-            });
+            }));
         }
 
         if (url.pathname === "/api/rooms/create" && req.method === "POST") {
@@ -90,18 +156,18 @@ const server = serve<WSContext>({
                 headers: req.headers,
             });
             if (!session) {
-                return new Response("Unauthorized", { status: 401 });
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
             }
 
             const body = (await req.json()) as { name?: string } | null;
             if (!body || typeof body.name !== "string" || !body.name.trim()) {
-                return new Response("Bad Request: Missing room name", { status: 400 });
+                return withCors(req, new Response("Bad Request: Missing room name", { status: 400 }));
             }
 
             const newRoom = roomRepo.createRoom(body.name.trim());
-            return new Response(JSON.stringify(newRoom), {
+            return withCors(req, new Response(JSON.stringify(newRoom), {
                 headers: { "Content-Type": "application/json" },
-            });
+            }));
         }
 
         const roomMessageMatch = url.pathname.match(/^\/api\/rooms\/([^\/]+)\/messages$/);
@@ -110,20 +176,20 @@ const server = serve<WSContext>({
                 headers: req.headers,
             });
             if (!session) {
-                return new Response("Unauthorized", { status: 401 });
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
             }
             const roomId = roomMessageMatch[1];
             if (!roomId) {
-                return new Response("Bad Request: Missing room ID", { status: 400 });
+                return withCors(req, new Response("Bad Request: Missing room ID", { status: 400 }));
             }
             try {
                 const messages = getRoomMessages(roomId);
-                return new Response(JSON.stringify(messages), {
+                return withCors(req, new Response(JSON.stringify(messages), {
                     headers: { "Content-Type": "application/json" },
-                });
+                }));
             } catch (error) {
                 console.error("❌ Error fetching room messages:", error);
-                return new Response("Internal Server Error", { status: 500 });
+                return withCors(req, new Response("Internal Server Error", { status: 500 }));
             }
         }
 
