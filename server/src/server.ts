@@ -163,6 +163,42 @@ const server = serve<WSContext>({
             );
         }
 
+        if (url.pathname === "/api/messages" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+
+            const body = (await req.json()) as {
+                targetId?: string;
+                content?: string;
+                type?: "direct" | "room";
+            } | null;
+
+            const targetId = body?.targetId?.trim();
+            const content = body?.content?.trim();
+            const messageType = body?.type;
+
+            if (!targetId || !content || (messageType !== "direct" && messageType !== "room")) {
+                return withCors(req, new Response("Bad Request: Invalid payload", { status: 400 }));
+            }
+
+            const savedMessage =
+                messageType === "direct"
+                    ? messageRepo.savePrivateMessage(session.user.id, targetId, content)
+                    : roomRepo.saveRoomMessage(session.user.id, targetId, content);
+
+            return withCors(
+                req,
+                new Response(JSON.stringify(savedMessage), {
+                    headers: { "Content-Type": "application/json" },
+                }),
+            );
+        }
+
         if (url.pathname.startsWith("/api/messages/")) {
             const session = await auth.api.getSession({
                 headers: req.headers,
