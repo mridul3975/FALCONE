@@ -28,7 +28,7 @@ export default function ChatWindow({ activeChat }: { activeChat: any }): import(
     // 2. Send Message
     const handleSend = () => {
         const payload = {
-            type: activeChat.type === 'room' ? 'room_message' : 'chat_message',
+            type: activeChat.type === 'room' ? 'room_message' : 'chat-message',
             [activeChat.type === 'room' ? 'roomId' : 'receiverId']: activeChat.id,
             text: text
         };
