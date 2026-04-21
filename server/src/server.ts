@@ -137,15 +137,26 @@ const server = serve<WSContext>({
             if (!session) {
                 return withCors(req, new Response("Unauthorized", { status: 401 }));
             }
+            //users i have direct messages only
 
             const users = db
                 .query(
                     `
-                        SELECT id, name, email, image
-                        FROM user
-                        WHERE id != $currentUserId
-                        ORDER BY createdAt DESC
-                        LIMIT 50
+SELECT
+u.id, u.name, u.email, u.image,
+MAX(m.timestamp) AS lastMessageAt
+FROM user u
+JOIN messages m
+ON (
+(m.senderId = $currentUserId AND m.receiverId = u.id)
+OR
+(m.receiverId = $currentUserId AND m.senderId = u.id)
+)
+WHERE u.id != $currentUserId
+AND m.receiverId IS NOT NULL
+GROUP BY u.id, u.name, u.email, u.image
+ORDER BY lastMessageAt DESC
+LIMIT 50
                     `,
                 )
                 .all({ $currentUserId: session.user.id }) as Array<{
