@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getBearerToken, useSession } from "../api/auth";
 
 interface ActiveUser {
@@ -55,6 +55,7 @@ const DashboardPage = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [messages, setMessages] = useState<MessageItem[]>([]);
+    const currentUserId = session?.user.id;
 
     useEffect(() => {
         if (isPending || !session) {
@@ -190,6 +191,15 @@ const DashboardPage = () => {
 
         fetchMessages();
     }, [activeChat.id, activeChat.type]);
+    const scrollRef = useRef<HTMLDivElement>(null);
+
+    // Scroll to bottom whenever messages array changes
+    useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollIntoView({ behavior: "smooth" });
+        }
+    }, [messages]);
+
 
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,#f8fbff_0%,#eef3f9_45%,#e7edf5_100%)] text-slate-900">
@@ -265,24 +275,29 @@ const DashboardPage = () => {
                                 <div className="flex flex-1 flex-col overflow-hidden">
                                     <div className="flex-1 overflow-y-auto p-6 space-y-4">
                                         {messages.length > 0 ? (
-                                            messages.map((msg) => (
-                                                <div key={msg.id} className={`flex ${msg.senderId === session?.user?.id ? "justify-end" : "justify-start"}`}>
+                                            messages.map((msg: MessageItem) => {
+                                                const isMe = msg.senderId === currentUserId;
+                                                return (
                                                     <div
-                                                        className={`max-w-[70%] rounded-2xl px-4 py-2 ${msg.senderId === session?.user?.id
-                                                            ? "bg-sky-600 text-white"
-                                                            : "bg-slate-100 text-slate-900"
-                                                            }`}
+                                                        key={msg.id}
+                                                        className={`flex w-full ${isMe ? "justify-end" : "justify-start"}`}
                                                     >
-                                                        <p className="text-sm">{msg.content}</p>
-                                                        <span className="text-[10px] opacity-70">
-                                                            {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                                        </span>
+                                                        <div className={`max-w-[70%] rounded-[20px] px-4 py-2 shadow-sm ${isMe
+                                                            ? "bg-sky-600 text-white rounded-br-none"
+                                                            : "bg-white border border-slate-200 text-slate-900 rounded-bl-none"
+                                                            }`}>
+                                                            <p className="text-sm leading-relaxed">{msg.content}</p>
+                                                            <span className={`block text-[9px] mt-1 text-right ${isMe ? "text-sky-100" : "text-slate-400"}`}>
+                                                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                                            </span>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ))
+                                                );
+                                            })
                                         ) : (
                                             <p className="mt-10 text-center text-slate-400">No messages yet. Say hi!</p>
                                         )}
+                                        <div ref={scrollRef} />
                                     </div>
 
                                     <div className="border-t border-slate-200 px-6 py-5 sm:px-8">
@@ -320,5 +335,7 @@ const DashboardPage = () => {
     );
 
 };
+
+
 
 export default DashboardPage;
