@@ -61,9 +61,17 @@ const getStatusLabel = (msg: MessageItem) => {
     return "Sent";
 };
 
-const fetchSidebarData = async (setData: React.Dispatch<React.SetStateAction<DashboardData>>) => {
+type RoomHistoryMessage = {
+    id: string;
+    senderId: string;
+    timestamp: string;
+};
+
+const fetchSidebarData = async (
+    setData: React.Dispatch<React.SetStateAction<DashboardData>>,
+): Promise<DashboardData | null> => {
     const bearerToken = getBearerToken();
-    if (!bearerToken) return;
+    if (!bearerToken) return null;
 
     const [usersRes, roomsRes] = await Promise.all([
         fetch("http://localhost:3000/api/users", {
@@ -80,7 +88,9 @@ const fetchSidebarData = async (setData: React.Dispatch<React.SetStateAction<Das
 
     const users = (await usersRes.json()) as UserItem[];
     const rooms = (await roomsRes.json()) as RoomItem[];
-    setData({ users, rooms });
+    const next = { users, rooms };
+    setData(next);
+    return next;
 };
 
 const DashboardPage = () => {
@@ -108,6 +118,14 @@ const DashboardPage = () => {
         const bTime = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
         return bTime - aTime;
     });
+    const [showCreateRoomModal, setShowCreateRoomModal] = useState(false);
+    const [newRoomName, setNewRoomName] = useState("");
+    const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+    const [createRoomError, setCreateRoomError] = useState<string | null>(null);
+
+    const [unreadDirect, setUnreadDirect] = useState<Record<string, number>>({});
+    const [unreadRooms, setUnreadRooms] = useState<Record<string, number>>({});
+    const [lastSeenRooms, setLastSeenRooms] = useState<Record<string, string>>({});
 
 
 
@@ -146,7 +164,10 @@ const DashboardPage = () => {
         const run = async () => {
             try {
                 setIsLoading(true);
-                await fetchSidebarData(setData);
+                const sidebar = await fetchSidebarData(setData);
+                if (sidebar) {
+                    await refreshUnreadCounts(sidebar.users, sidebar.rooms);
+                }
             } catch {
                 setError("Failed to load data");
             } finally {
@@ -162,7 +183,10 @@ const DashboardPage = () => {
 
         const id = setInterval(async () => {
             try {
-                await fetchSidebarData(setData);
+                const sidebar = await fetchSidebarData(setData);
+                if (sidebar) {
+                    await refreshUnreadCounts(sidebar.users, sidebar.rooms);
+                }
             } catch {
                 // keep silent during polling
             }
@@ -215,7 +239,10 @@ const DashboardPage = () => {
 
             const savedMessage = await response.json();
             setMessages((prev) => [...prev, mapServerMessage(savedMessage)]);
-            await fetchSidebarData(setData);
+            const sidebar = await fetchSidebarData(setData);
+            if (sidebar) {
+                await refreshUnreadCounts(sidebar.users, sidebar.rooms);
+            }
 
         } catch {
             setSendError("Unable to send message right now.");
@@ -279,6 +306,15 @@ const DashboardPage = () => {
                         const refreshedHistory = (await refreshed.json()) as ServerMessage[];
                         setMessages(refreshedHistory.map(mapServerMessage));
                     }
+
+                    setUnreadDirect((prev) => ({ ...prev, [activeChat.id as string]: 0 }));
+                } else {
+                    const roomHistory = chatHistory as RoomHistoryMessage[];
+                    const latest = roomHistory.length > 0 ? roomHistory[roomHistory.length - 1].timestamp : null;
+                    if (latest) {
+                        setLastSeenRooms((prev) => ({ ...prev, [activeChat.id as string]: latest }));
+                    }
+                    setUnreadRooms((prev) => ({ ...prev, [activeChat.id as string]: 0 }));
                 }
             } catch {
                 setMessages([]);
@@ -293,15 +329,129 @@ const DashboardPage = () => {
             scrollRef.current.scrollIntoView({ behavior: "smooth" });
         }
     }, [messages]);
+    const refreshUnreadCounts = async (
+        usersList: UserItem[] = data.users,
+        roomsList: RoomItem[] = data.rooms,
+    ) => {
+        const bearerToken = getBearerToken();
+        if (!bearerToken || !currentUserId) return;
+
+
+        const directCounts = await Promise.all(
+            usersList.map(async (u) => {
+                try {
+                    const res = await fetch(`http://localhost:3000/api/messages/${u.id}`, {
+                        headers: { Authorization: `Bearer ${bearerToken}` },
+                    });
+                    if (!res.ok) return [u.id, 0] as const;
+
+
+                    const history = (await res.json()) as ServerMessage[];
+                    const count = history.filter(
+                        (m) => m.senderId !== currentUserId && m.status !== "read",
+                    ).length;
+                    return [u.id, activeChat.type === "direct" && activeChat.id === u.id ? 0 : count] as const;
+                } catch {
+                    return [u.id, 0] as const;
+                }
+            }),
+        );
+
+        const roomCounts = await Promise.all(
+            roomsList.map(async (r) => {
+                try {
+                    const res = await fetch(`http://localhost:3000/api/rooms/${r.id}/messages`, {
+                        headers: { Authorization: `Bearer ${bearerToken}` },
+                    });
+                    if (!res.ok) return [r.id, 0] as const;
+
+                    const history = (await res.json()) as RoomHistoryMessage[];
+                    const seenAt = lastSeenRooms[r.id];
+                    const count = history.filter((m) => {
+                        if (m.senderId === currentUserId) return false;
+                        if (!seenAt) return true;
+                        return new Date(m.timestamp).getTime() > new Date(seenAt).getTime();
+                    }).length;
+
+                    return [r.id, activeChat.type === "room" && activeChat.id === r.id ? 0 : count] as const;
+                } catch {
+                    return [r.id, 0] as const;
+                }
+            }),
+        );
+
+        setUnreadDirect(Object.fromEntries(directCounts));
+        setUnreadRooms(Object.fromEntries(roomCounts));
+    };
+
+    const handleCreateRoom = async (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        const name = newRoomName.trim();
+        if (!name) {
+            setCreateRoomError("Room name is required.");
+            return;
+        }
+
+        const bearerToken = getBearerToken();
+        if (!bearerToken) {
+            setCreateRoomError("Missing bearer token. Please sign in again.");
+            return;
+        }
+
+        try {
+            setIsCreatingRoom(true);
+            setCreateRoomError(null);
+
+            const response = await fetch("http://localhost:3000/api/rooms/create", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${bearerToken}`,
+                },
+                body: JSON.stringify({ name }),
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to create room");
+            }
+
+            const sidebar = await fetchSidebarData(setData);
+            if (sidebar) {
+                await refreshUnreadCounts(sidebar.users, sidebar.rooms);
+            }
+
+            setNewRoomName("");
+            setShowCreateRoomModal(false);
+        } catch {
+            setCreateRoomError("Unable to create room right now.");
+        } finally {
+            setIsCreatingRoom(false);
+        }
+    };
 
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,#f8fbff_0%,#eef3f9_45%,#e7edf5_100%)] text-slate-900">
             <div className="mx-auto flex min-h-screen w-full max-w-screen-2xl gap-5 p-4 sm:p-6">
                 <aside className="flex w-72 flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/90 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
                     <div className="border-b border-slate-200 px-5 py-5">
-                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Live Context</p>
-                        <h1 className="mt-2 text-2xl font-semibold text-slate-900">Connections</h1>
-                        <p className="mt-1 text-sm text-slate-500">Choose a user or room to inspect the active target.</p>
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Live Context</p>
+                                <h1 className="mt-2 text-2xl font-semibold text-slate-900">Connections</h1>
+                                <p className="mt-1 text-sm text-slate-500">Choose a user or room to inspect the active target.</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setCreateRoomError(null);
+                                    setShowCreateRoomModal(true);
+                                }}
+                                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                            >
+                                + New Room
+                            </button>
+                        </div>
                     </div>
 
                     <div className="flex-1 overflow-y-auto px-4 py-5">
@@ -344,7 +494,14 @@ const DashboardPage = () => {
                                             <span className="block truncate text-sm font-medium text-slate-900">{u.name || u.email || "Unknown user"}</span>
                                             <span className="block text-xs text-slate-500">Direct thread</span>
                                         </span>
-                                        <span className="ml-3 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">User</span>
+                                        <span className="ml-3 flex items-center gap-2">
+                                            {(unreadDirect[u.id] ?? 0) > 0 && (
+                                                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                                    {unreadDirect[u.id]}
+                                                </span>
+                                            )}
+                                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">User</span>
+                                        </span>
                                     </button>
                                 ))}
                             </div>
@@ -365,7 +522,14 @@ const DashboardPage = () => {
                                             <span className="block truncate text-sm font-medium text-slate-900"># {r.name}</span>
                                             <span className="block text-xs text-slate-500">Room channel</span>
                                         </span>
-                                        <span className="ml-3 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">Room</span>
+                                        <span className="ml-3 flex items-center gap-2">
+                                            {(unreadRooms[r.id] ?? 0) > 0 && (
+                                                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                                    {unreadRooms[r.id]}
+                                                </span>
+                                            )}
+                                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">Room</span>
+                                        </span>
                                     </button>
                                 ))}
                             </div>
@@ -450,6 +614,45 @@ const DashboardPage = () => {
                     </div>
                 </main>
             </div >
+
+            {showCreateRoomModal && (
+                <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+                    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+                        <h3 className="text-lg font-semibold text-slate-900">Create New Room</h3>
+                        <p className="mt-1 text-sm text-slate-500">Give your room a clear, short name.</p>
+
+                        <form className="mt-4 space-y-3" onSubmit={handleCreateRoom}>
+                            <input
+                                value={newRoomName}
+                                onChange={(e) => setNewRoomName(e.target.value)}
+                                placeholder="e.g. design-ops"
+                                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
+                            />
+
+                            {createRoomError && (
+                                <p className="text-sm text-rose-600">{createRoomError}</p>
+                            )}
+
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowCreateRoomModal(false)}
+                                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isCreatingRoom}
+                                    className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-70"
+                                >
+                                    {isCreatingRoom ? "Creating..." : "Create Room"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div >
     );
 
