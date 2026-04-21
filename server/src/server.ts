@@ -227,6 +227,38 @@ LIMIT 50
             );
         }
 
+        if (url.pathname === "/api/messages/mark-read" && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+
+            const body = (await req.json().catch(() => null)) as { otherUserId?: string } | null;
+            const otherUserId = body?.otherUserId?.trim();
+
+            if (!otherUserId) {
+                return withCors(req, new Response("Bad Request: Missing otherUserId", { status: 400 }));
+            }
+
+            const updated = messageRepo.markconversationAsRead(session.user.id, otherUserId);
+
+            server.publish(otherUserId, JSON.stringify({
+                type: "message-status",
+                data: {
+                    fromUserId: session.user.id,
+                    status: "read",
+                    updatedCount: updated,
+                },
+            }));
+
+            return withCors(
+                req,
+                new Response(JSON.stringify({ updated }), {
+                    headers: { "Content-Type": "application/json" },
+                }),
+            );
+        }
+
         if (url.pathname.startsWith("/api/messages/")) {
             const session = await auth.api.getSession({
                 headers: req.headers,
@@ -246,6 +278,19 @@ LIMIT 50
                 return withCors(req, new Response("Bad Request: Missing other user ID", { status: 400 }));
             }
             const history = messageRepo.getConversation(session.user.id, otherUserId);
+            const deliveredCount = messageRepo.markconversationAsDelivered(session.user.id, otherUserId);
+
+            if (deliveredCount > 0) {
+                server.publish(otherUserId, JSON.stringify({
+                    type: "message-status",
+                    data: {
+                        fromUserId: session.user.id,
+                        status: "delivered",
+                        updatedCount: deliveredCount,
+                    },
+                }));
+            }
+
             return withCors(req, new Response(JSON.stringify(history), {
                 headers: { "Content-Type": "application/json" },
             }));
@@ -283,6 +328,8 @@ LIMIT 50
             }));
         }
 
+
+
         if (url.pathname === "/api/messages" && req.method === "POST") {
             const session = await auth.api.getSession({ headers: req.headers });
             if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
@@ -300,11 +347,11 @@ LIMIT 50
             try {
                 if (type === "direct") {
                     const saved = messageRepo.savePrivateMessage(session.user.id, targetId, content);
-                    const payload = { ...saved, timestamp: (saved.timestamp as unknown) instanceof Date ? (saved.timestamp as Date).toISOString() : saved.timestamp };
+                    const payload = saved
                     return withCors(req, new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } }));
                 } else if (type === "room") {
                     const saved = roomRepo.saveRoomMessage(session.user.id, targetId, content);
-                    const payload = { ...saved, timestamp: (saved.timestamp as unknown) instanceof Date ? (saved.timestamp as unknown as Date).toISOString() : saved.timestamp };
+                    const payload = saved;
                     return withCors(req, new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } }));
                 } else {
                     return withCors(req, new Response("Bad Request: unknown message type", { status: 400 }));

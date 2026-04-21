@@ -1,17 +1,33 @@
 import db from "../db/connection";
 
+export type MessageContentType = "text" | "file";
+
 export interface ChatMessage {
     id: string;
     senderId: string;
-    receiverId: string;
+    receiverId: string | null;
     roomId: string | null;
     text: string;
-    status: string;
-    timestamp: Date;
+    contentType: MessageContentType;
+    fileUrl: string | null;
+    fileName: string | null;
+    fileSize: number | null;
+    status: "sent" | "delivered" | "read";
+    timestamp: string;
+    deliveredAt: string | null;
+    readAt: string | null;
 }
 
 export const messageRepo = {
-    savePrivateMessage: (senderId: string, receiverId: string, text: string): ChatMessage => {
+    savePrivateMessage: (senderId: string,
+        receiverId: string,
+        text: string,
+        options?: {
+            contentType?: MessageContentType;
+            fileUrl?: string | null;
+            fileName?: string | null;
+            fileSize?: number | null;
+        },): ChatMessage => {
 
         // 1. 🚨 DEBUG TRACKER: Let's see exactly what values are making it to this function!
         console.log("🛠️ DEBUG - Variables about to be saved:", { senderId, receiverId, text });
@@ -23,42 +39,99 @@ export const messageRepo = {
 
         const id = crypto.randomUUID();
         const timestamp = new Date();
-        const status = "sent";
+        const status: ChatMessage["status"] = "sent";
+        const contentType = options?.contentType || "text";
+        const fileUrl = options?.fileUrl || null;
+        const fileName = options?.fileName || null;
+        const fileSize = options?.fileSize || null;
 
         try {
             // 3. Wrapping "text" in quotes to prevent SQLite from thinking it's a command.
             // 4. Using 7 explicit positional question marks to prevent any alignment bugs.
-            const query = db.query(`
-                INSERT INTO messages (id, senderId, receiverId, roomId, "text", status, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            `);
 
-            // 5. Passing exactly 7 variables in perfect order.
-            query.run(id, senderId, receiverId, null, text, status, timestamp.toISOString());
+            db.query(`
+            INSERT INTO messages
+                (id, senderId, receiverId, roomId, text, contentType, fileUrl, fileName, fileSize, status, timestamp, deliveredAt, readAt)
+            VALUES
+                (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+        `).run(
+                id,
+                senderId,
+                receiverId,
+                text,
+                contentType,
+                fileUrl,
+                fileName,
+                fileSize,
+                status,
+                timestamp.toISOString()
+            );
 
-            console.log(`✅ Message safely saved to DB!`);
+            return {
+                id,
+                senderId,
+                receiverId,
+                roomId: null,
+                text,
+                contentType,
+                fileUrl,
+                fileName,
+                fileSize,
+                status,
+                timestamp: timestamp.toISOString(),
+                deliveredAt: null,
+                readAt: null
+            };
         } catch (error) {
-            console.error("❌ DB Insert Error:", error);
+            console.error("❌ DB Save Error:", error);
             throw error;
         }
-
-        return { id, senderId, receiverId, roomId: null, text, status, timestamp };
     },
     getConversation: (userId: string, otherUserId: string): ChatMessage[] => {
-        try {
-            console.log(`🔍 Querying conversation between ${userId} and ${otherUserId}`);
-            const query = db.query(`
-            SELECT * FROM messages
-            WHERE (senderId = ? AND receiverId = ?)
-               OR (senderId = ? AND receiverId = ?)
+        return db.query(`
+            SELECT
+                id, senderId, receiverId, roomId, text, contentType, fileUrl, fileName, fileSize,
+                status, timestamp, deliveredAt, readAt
+            FROM messages
+            WHERE
+                (senderId = $userId AND receiverId = $otherUserId)
+                OR
+                (senderId = $otherUserId AND receiverId = $userId)
             ORDER BY timestamp ASC
-        `);
-            const results = query.all(userId, otherUserId, otherUserId, userId) as ChatMessage[];
-            console.log(`📨 Found ${results.length} messages:`, results);
-            return results;
-        } catch (error) {
-            console.error("❌ DB Query Error:", error);
-            throw error;
-        }
+        `).all({
+            $userId: userId,
+            $otherUserId: otherUserId,
+        }) as ChatMessage[];
+    },
+
+    markconversationAsDelivered: (userId: string, otherUserId: string): number => {
+        const now = new Date().toISOString();
+        const result = db.query(`
+            UPDATE messages
+            SET status = 'delivered', deliveredAt = COALESCE(deliveredAt, $now)
+            WHERE
+                receiverId = $recipientId AND senderId = $otherUserId AND status = 'sent'
+        `).run({
+            $now: now,
+            $recipientId: userId,
+            $otherUserId: otherUserId
+        });
+        return result.changes;
+    },
+
+    markconversationAsRead: (userId: string, otherUserId: string): number => {
+        const now = new Date().toISOString();
+        const result = db.query(`
+            UPDATE messages
+            SET status = 'read', readAt = COALESCE(readAt, $now)
+            WHERE
+                receiverId = $recipientId AND senderId = $otherUserId AND status IN ('sent', 'delivered')
+        `).run({
+            $now: now,
+            $recipientId: userId,
+            $otherUserId: otherUserId
+        });
+        return result.changes;
     }
 };
+

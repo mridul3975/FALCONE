@@ -23,6 +23,9 @@ interface MessageItem {
     senderId: string;
     content: string;
     createdAt: string;
+    status: "sent" | "delivered" | "read";
+    deliveredAt: string | null;
+    readAt: string | null;
 }
 
 interface DashboardData {
@@ -35,14 +38,26 @@ type ServerMessage = {
     senderId: string;
     text: string;
     timestamp: string;
+    status?: "sent" | "delivered" | "read";
+    deliveredAt?: string | null;
+    readAt?: string | null;
 };
 
-const mapServerMessage = (msg: ServerMessage) => ({
+const mapServerMessage = (msg: ServerMessage): MessageItem => ({
     id: msg.id,
     senderId: msg.senderId,
     content: msg.text,
     createdAt: msg.timestamp,
+    status: msg.status ?? "sent",
+    deliveredAt: msg.deliveredAt ?? null,
+    readAt: msg.readAt ?? null,
 });
+
+const getStatusLabel = (msg: MessageItem) => {
+    if (msg.status === "read") return "Read";
+    if (msg.status === "delivered") return "Delivered";
+    return "Sent";
+};
 
 const DashboardPage = () => {
     //State Management
@@ -55,6 +70,7 @@ const DashboardPage = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [messages, setMessages] = useState<MessageItem[]>([]);
+    const scrollRef = useRef<HTMLDivElement>(null);
     const currentUserId = session?.user.id;
     const [searchQuery, setSearchQuery] = useState("");
     const [isSearching, setIsSearching] = useState(false);
@@ -220,6 +236,28 @@ const DashboardPage = () => {
 
                 const chatHistory = (await response.json()) as ServerMessage[];
                 setMessages(chatHistory.map(mapServerMessage));
+
+                if (activeChat.type === "direct") {
+                    await fetch("http://localhost:3000/api/messages/mark-read", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${bearerToken}`,
+                        },
+                        body: JSON.stringify({ otherUserId: activeChat.id }),
+                    });
+
+                    const refreshed = await fetch(endpoint, {
+                        headers: {
+                            Authorization: `Bearer ${bearerToken}`,
+                        },
+                    });
+
+                    if (refreshed.ok) {
+                        const refreshedHistory = (await refreshed.json()) as ServerMessage[];
+                        setMessages(refreshedHistory.map(mapServerMessage));
+                    }
+                }
             } catch {
                 setMessages([]);
             }
@@ -227,15 +265,12 @@ const DashboardPage = () => {
 
         fetchMessages();
     }, [activeChat.id, activeChat.type]);
-    const scrollRef = useRef<HTMLDivElement>(null);
 
-    // Scroll to bottom whenever messages array changes
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollIntoView({ behavior: "smooth" });
         }
     }, [messages]);
-
 
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,#f8fbff_0%,#eef3f9_45%,#e7edf5_100%)] text-slate-900">
@@ -264,9 +299,10 @@ const DashboardPage = () => {
                                 {searchQuery && (
                                     <button
                                         onClick={handleSearchID} // We will define this next
+                                        disabled={isSearching}
                                         className="absolute right-2 top-1.5 rounded-lg bg-sky-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-sky-700"
                                     >
-                                        Find ID
+                                        {isSearching ? "Finding..." : "Find ID"}
                                     </button>
                                 )}
                             </div>
@@ -274,7 +310,7 @@ const DashboardPage = () => {
                         <div className="mb-6 mt-5">
                             <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-slate-400 uppercase">Direct</h3>
                             <div className="space-y-2">
-                                {data.users.map(u => (
+                                {filteredUsers.map(u => (
                                     <button
                                         key={u.id}
                                         type="button"
@@ -332,18 +368,24 @@ const DashboardPage = () => {
                                             messages.map((msg: MessageItem) => {
                                                 const isMe = msg.senderId === currentUserId;
                                                 return (
-                                                    <div
-                                                        key={msg.id}
-                                                        className={`flex w-full ${isMe ? "justify-end" : "justify-start"}`}
-                                                    >
-                                                        <div className={`max-w-[70%] rounded-[20px] px-4 py-2 shadow-sm ${isMe
-                                                            ? "bg-sky-600 text-white rounded-br-none"
-                                                            : "bg-white border border-slate-200 text-slate-900 rounded-bl-none"
-                                                            }`}>
+                                                    <div key={msg.id} className={`flex w-full ${isMe ? "justify-end" : "justify-start"}`}>
+                                                        <div
+                                                            className={`max-w-[70%] rounded-[20px] px-4 py-2 shadow-sm ${isMe
+                                                                ? "bg-sky-600 text-white rounded-br-none"
+                                                                : "bg-white border border-slate-200 text-slate-900 rounded-bl-none"
+                                                                }`}
+                                                        >
                                                             <p className="text-sm leading-relaxed">{msg.content}</p>
-                                                            <span className={`block text-[9px] mt-1 text-right ${isMe ? "text-sky-100" : "text-slate-400"}`}>
-                                                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                                            </span>
+                                                            <div className={`mt-1 flex items-center gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
+                                                                <span className={`block text-[9px] ${isMe ? "text-sky-100" : "text-slate-400"}`}>
+                                                                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                                                </span>
+                                                                {isMe && (
+                                                                    <span className="block text-[9px] font-semibold text-sky-100/90">
+                                                                        {getStatusLabel(msg)}
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 );
@@ -384,8 +426,8 @@ const DashboardPage = () => {
                         )}
                     </div>
                 </main>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 
 };

@@ -1,10 +1,10 @@
 import db from "./connection";
 
 export function initDb() {
-    // ==========================================
-    // 1. BETTER AUTH TABLES
-    // ==========================================
-    db.query(`
+  // ==========================================
+  // 1. BETTER AUTH TABLES
+  // ==========================================
+  db.query(`
     CREATE TABLE IF NOT EXISTS user (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -16,7 +16,7 @@ export function initDb() {
     )
   `).run();
 
-    db.query(`
+  db.query(`
     CREATE TABLE IF NOT EXISTS session (
       id TEXT PRIMARY KEY,
       expiresAt DATETIME NOT NULL,
@@ -29,7 +29,7 @@ export function initDb() {
     )
   `).run();
 
-    db.query(`
+  db.query(`
     CREATE TABLE IF NOT EXISTS account (
       id TEXT PRIMARY KEY,
       accountId TEXT NOT NULL,
@@ -48,7 +48,7 @@ export function initDb() {
     )
   `).run();
 
-    db.query(`
+  db.query(`
     CREATE TABLE IF NOT EXISTS verification (
       id TEXT PRIMARY KEY,
       identifier TEXT NOT NULL,
@@ -59,10 +59,10 @@ export function initDb() {
     )
   `).run();
 
-    // ==========================================
-    // 2. CHAT APP TABLES (The missing pieces!)
-    // ==========================================
-    db.query(`
+  // ==========================================
+  // 2. CHAT APP TABLES
+  // ==========================================
+  db.query(`
     CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -70,7 +70,7 @@ export function initDb() {
     )
   `).run();
 
-    db.query(`
+  db.query(`
     CREATE TABLE IF NOT EXISTS room_members (
       roomId TEXT NOT NULL,
       userId TEXT NOT NULL,
@@ -81,7 +81,7 @@ export function initDb() {
     )
   `).run();
 
-    db.query(`
+  db.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       senderId TEXT NOT NULL,
@@ -96,5 +96,30 @@ export function initDb() {
     )
   `).run();
 
-    console.log("🗄️  Database schema initialized (Auth + Chat Tables complete)");
+  ensureMessageColumns();
+
+  console.log("🗄️  Database schema initialized (Auth + Chat Tables complete)");
+}
+
+function ensureMessageColumns() {
+  const columns = db
+    .query(`PRAGMA table_info(messages)`)
+    .all() as Array<{ name: string }>;
+
+  const existing = new Set(columns.map((c) => c.name));
+
+  const alters: string[] = [];
+  if (!existing.has("contentType")) alters.push(`ALTER TABLE messages ADD COLUMN contentType TEXT NOT NULL DEFAULT 'text'`);
+  if (!existing.has("fileUrl")) alters.push(`ALTER TABLE messages ADD COLUMN fileUrl TEXT`);
+  if (!existing.has("fileName")) alters.push(`ALTER TABLE messages ADD COLUMN fileName TEXT`);
+  if (!existing.has("fileSize")) alters.push(`ALTER TABLE messages ADD COLUMN fileSize INTEGER`);
+  if (!existing.has("deliveredAt")) alters.push(`ALTER TABLE messages ADD COLUMN deliveredAt DATETIME`);
+  if (!existing.has("readAt")) alters.push(`ALTER TABLE messages ADD COLUMN readAt DATETIME`);
+
+  for (const sql of alters) {
+    db.query(sql).run();
+  }
+
+  db.query(`CREATE INDEX IF NOT EXISTS idx_messages_receiver_sender_status ON messages(receiverId, senderId, status)`).run();
+  db.query(`CREATE INDEX IF NOT EXISTS idx_messages_receiver_sender_readAt ON messages(receiverId, senderId, readAt)`).run();
 }
