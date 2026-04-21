@@ -56,6 +56,41 @@ const DashboardPage = () => {
     const [error, setError] = useState<string | null>(null);
     const [messages, setMessages] = useState<MessageItem[]>([]);
     const currentUserId = session?.user.id;
+    const [searchQuery, setSearchQuery] = useState("");
+    const [isSearching, setIsSearching] = useState(false);
+    const filteredUsers = data.users.filter(u => {
+        const nameMatch = u.name?.toLowerCase().includes(searchQuery.toLowerCase());
+        const emailMatch = u.email?.toLowerCase().includes(searchQuery.toLowerCase());
+        return nameMatch || emailMatch;
+    });
+    const handleSearchID = async () => {
+        setIsSearching(true);
+        try {
+            const bearerToken = getBearerToken();
+            const userId = searchQuery.trim();
+
+            const res = await fetch(`http://localhost:3000/api/users/${userId}`, {
+                headers: {
+                    Authorization: `Bearer ${bearerToken}`,
+                },
+            });
+            if (res.ok) {
+                const foundUser = await res.json();
+                setActiveChat({ id: foundUser.id, type: "direct" });
+                setData(prev => ({
+                    ...prev,
+                    users: prev.users.some(u => u.id === foundUser.id) ? prev.users : [...prev.users, foundUser]
+                }));
+                setSearchQuery("");
+            } else {
+                alert("User ID not found.");
+            }
+        } catch (err) {
+            console.error("Search failed", err);
+        } finally {
+            setIsSearching(false);
+        }
+    };
 
     useEffect(() => {
         if (isPending || !session) {
@@ -165,6 +200,7 @@ const DashboardPage = () => {
                     setMessages([]);
                     return;
                 }
+
                 const endpoint =
                     activeChat.type === "direct"
                         ? `http://localhost:3000/api/messages/${activeChat.id}`
@@ -217,6 +253,24 @@ const DashboardPage = () => {
                         {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">Error: {error}</p>}
 
                         {/* Direct Section */}
+                        <div className="px-5 mb-4">
+                            <div className="relative">
+                                <input
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Search IDs or names..."
+                                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                                />
+                                {searchQuery && (
+                                    <button
+                                        onClick={handleSearchID} // We will define this next
+                                        className="absolute right-2 top-1.5 rounded-lg bg-sky-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-sky-700"
+                                    >
+                                        Find ID
+                                    </button>
+                                )}
+                            </div>
+                        </div>
                         <div className="mb-6 mt-5">
                             <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-slate-400 uppercase">Direct</h3>
                             <div className="space-y-2">

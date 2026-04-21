@@ -162,38 +162,55 @@ const server = serve<WSContext>({
                 }),
             );
         }
-
-        if (url.pathname === "/api/messages" && req.method === "POST") {
+        if (url.pathname.match(/^\/api\/users\/([^/]+)$/) && req.method === "GET") {
             const session = await auth.api.getSession({
                 headers: req.headers,
             });
 
+            console.log("GET /api/users/:id hit");
+            console.log("request path:", url.pathname);
+            console.log("raw auth header:", req.headers.get("authorization"));
+
             if (!session) {
+                console.log("no session found");
                 return withCors(req, new Response("Unauthorized", { status: 401 }));
             }
 
-            const body = (await req.json()) as {
-                targetId?: string;
-                content?: string;
-                type?: "direct" | "room";
-            } | null;
+            const rawUserId = url.pathname.split("/").filter(Boolean).pop();
+            const userId = rawUserId ? decodeURIComponent(rawUserId).trim() : "";
 
-            const targetId = body?.targetId?.trim();
-            const content = body?.content?.trim();
-            const messageType = body?.type;
+            console.log("rawUserId:", rawUserId);
+            console.log("decoded userId:", userId);
+            console.log("current session user:", session.user.id);
 
-            if (!targetId || !content || (messageType !== "direct" && messageType !== "room")) {
-                return withCors(req, new Response("Bad Request: Invalid payload", { status: 400 }));
+            if (!userId) {
+                console.log("missing user id");
+                return withCors(req, new Response("Bad Request: Missing user ID", { status: 400 }));
             }
 
-            const savedMessage =
-                messageType === "direct"
-                    ? messageRepo.savePrivateMessage(session.user.id, targetId, content)
-                    : roomRepo.saveRoomMessage(session.user.id, targetId, content);
+            const user = db
+                .query(`
+    SELECT id, name, email, image
+    FROM user
+    WHERE id = $userId
+    LIMIT 1
+  `)
+                .get({ $userId: userId }) as { // Added the $ to the key here
+                    id: string;
+                    name: string;
+                    email: string;
+                    image: string | null;
+                } | null;
+
+            console.log("lookup result:", user);
+
+            if (!user) {
+                return withCors(req, new Response("Not Found", { status: 404 }));
+            }
 
             return withCors(
                 req,
-                new Response(JSON.stringify(savedMessage), {
+                new Response(JSON.stringify(user), {
                     headers: { "Content-Type": "application/json" },
                 }),
             );
