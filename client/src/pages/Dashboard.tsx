@@ -11,11 +11,13 @@ interface UserItem {
     id: string;
     name?: string | null;
     email?: string | null;
+    lastMessageAt?: string | null;
 }
 
 interface RoomItem {
     id: string;
     name: string;
+    createdAt: string;
 }
 
 interface MessageItem {
@@ -59,6 +61,28 @@ const getStatusLabel = (msg: MessageItem) => {
     return "Sent";
 };
 
+const fetchSidebarData = async (setData: React.Dispatch<React.SetStateAction<DashboardData>>) => {
+    const bearerToken = getBearerToken();
+    if (!bearerToken) return;
+
+    const [usersRes, roomsRes] = await Promise.all([
+        fetch("http://localhost:3000/api/users", {
+            headers: { Authorization: "Bearer " + bearerToken },
+        }),
+        fetch("http://localhost:3000/api/rooms", {
+            headers: { Authorization: "Bearer " + bearerToken },
+        }),
+    ]);
+
+    if (!usersRes.ok || !roomsRes.ok) {
+        throw new Error("Failed to fetch data");
+    }
+
+    const users = (await usersRes.json()) as UserItem[];
+    const rooms = (await roomsRes.json()) as RoomItem[];
+    setData({ users, rooms });
+};
+
 const DashboardPage = () => {
     //State Management
     const { data: session, isPending } = useSession();
@@ -74,11 +98,19 @@ const DashboardPage = () => {
     const currentUserId = session?.user.id;
     const [searchQuery, setSearchQuery] = useState("");
     const [isSearching, setIsSearching] = useState(false);
-    const filteredUsers = data.users.filter(u => {
+    const sortedFilteredUsers = data.users.filter(u => {
         const nameMatch = u.name?.toLowerCase().includes(searchQuery.toLowerCase());
         const emailMatch = u.email?.toLowerCase().includes(searchQuery.toLowerCase());
-        return nameMatch || emailMatch;
+        const lastMessageMatch = u.lastMessageAt?.toLowerCase().includes(searchQuery.toLowerCase());
+        return nameMatch || emailMatch || lastMessageMatch;
+    }).sort((a, b) => {
+        const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+        const bTime = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+        return bTime - aTime;
     });
+
+
+
     const handleSearchID = async () => {
         setIsSearching(true);
         try {
@@ -109,47 +141,35 @@ const DashboardPage = () => {
     };
 
     useEffect(() => {
-        if (isPending || !session) {
-            return;
-        }
+        if (isPending || !session) return;
 
-        const fetchData = async () => {
+        const run = async () => {
             try {
                 setIsLoading(true);
-                const bearerToken = getBearerToken();
-
-                if (!bearerToken) {
-                    throw new Error("Missing bearer token");
-                }
-
-                const [usersRes, roomsRes] = await Promise.all([
-                    fetch("http://localhost:3000/api/users", {
-                        headers: {
-                            Authorization: `Bearer ${bearerToken}`,
-                        },
-                    }),
-                    fetch("http://localhost:3000/api/rooms", {
-                        headers: {
-                            Authorization: `Bearer ${bearerToken}`,
-                        },
-                    }),
-                ]);
-                if (!usersRes.ok || !roomsRes.ok) {
-                    throw new Error("Failed to fetch data");
-                }
-                const users = (await usersRes.json()) as UserItem[];
-                const rooms = (await roomsRes.json()) as RoomItem[];
-                setData({ users, rooms });
-                setIsLoading(false);
-            }
-            catch (err) {
+                await fetchSidebarData(setData);
+            } catch {
                 setError("Failed to load data");
+            } finally {
                 setIsLoading(false);
             }
         };
 
-        fetchData();
+        run();
     }, [isPending, session]);
+
+    useEffect(() => {
+        if (!session) return;
+
+        const id = setInterval(async () => {
+            try {
+                await fetchSidebarData(setData);
+            } catch {
+                // keep silent during polling
+            }
+        }, 10000);
+
+        return () => clearInterval(id);
+    }, [session]);
 
     const handleSendMessage = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -170,6 +190,7 @@ const DashboardPage = () => {
             setSendError("Missing bearer token. Please sign in again.");
             return;
         }
+
 
         try {
             setIsSending(true);
@@ -194,6 +215,7 @@ const DashboardPage = () => {
 
             const savedMessage = await response.json();
             setMessages((prev) => [...prev, mapServerMessage(savedMessage)]);
+            await fetchSidebarData(setData);
 
         } catch {
             setSendError("Unable to send message right now.");
@@ -307,10 +329,11 @@ const DashboardPage = () => {
                                 )}
                             </div>
                         </div>
+
                         <div className="mb-6 mt-5">
                             <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-slate-400 uppercase">Direct</h3>
                             <div className="space-y-2">
-                                {filteredUsers.map(u => (
+                                {sortedFilteredUsers.map(u => (
                                     <button
                                         key={u.id}
                                         type="button"
@@ -435,3 +458,4 @@ const DashboardPage = () => {
 
 
 export default DashboardPage;
+
