@@ -10,8 +10,8 @@ import db from "./db/connection";
 // Initialize Database Schema
 initDb();
 
-const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || "0.0.0.0";
+const PORT = Number(process.env.PORT ?? 3000);
+const HOST = process.env.HOST ?? "0.0.0.0";
 
 const DEV_CLIENT_PORTS = [3000, 4173, 5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180];
 
@@ -148,7 +148,7 @@ const server = serve<WSContext>({
                         LIMIT 50
                     `,
                 )
-                .all({ currentUserId: session.user.id }) as Array<{
+                .all({ $currentUserId: session.user.id }) as Array<{
                     id: string;
                     name: string;
                     email: string;
@@ -272,6 +272,38 @@ const server = serve<WSContext>({
             }));
         }
 
+        if (url.pathname === "/api/messages" && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            type MessageRequest = { targetId?: string; content?: string; type?: "direct" | "room" };
+            const body = (await req.json().catch(() => null)) as MessageRequest | null;
+            const targetId = body?.targetId;
+            const content = body?.content;
+            const type = body?.type; // "direct" or "room"
+
+            if (!targetId || typeof content !== "string" || !type) {
+                return withCors(req, new Response("Bad Request", { status: 400 }));
+            }
+
+            try {
+                if (type === "direct") {
+                    const saved = messageRepo.savePrivateMessage(session.user.id, targetId, content);
+                    const payload = { ...saved, timestamp: (saved.timestamp as unknown) instanceof Date ? (saved.timestamp as Date).toISOString() : saved.timestamp };
+                    return withCors(req, new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } }));
+                } else if (type === "room") {
+                    const saved = roomRepo.saveRoomMessage(session.user.id, targetId, content);
+                    const payload = { ...saved, timestamp: (saved.timestamp as unknown) instanceof Date ? (saved.timestamp as unknown as Date).toISOString() : saved.timestamp };
+                    return withCors(req, new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } }));
+                } else {
+                    return withCors(req, new Response("Bad Request: unknown message type", { status: 400 }));
+                }
+            } catch (err) {
+                console.error("❌ Error saving message:", err);
+                return withCors(req, new Response("Internal Server Error", { status: 500 }));
+            }
+        }
+
         const roomMessageMatch = url.pathname.match(/^\/api\/rooms\/([^\/]+)\/messages$/);
         if (roomMessageMatch && req.method === "GET") {
             const session = await auth.api.getSession({
@@ -383,4 +415,4 @@ const server = serve<WSContext>({
         }
     },
 });
-console.log(`🚀 ChatrIX Server running at http://${server.hostname}:${server.port}`);
+console.log(`🚀 ChatrIX Server running at http://${HOST}:${PORT}`);
