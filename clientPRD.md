@@ -48,7 +48,19 @@ The design goal:
 | Real‑time updates | Receive `chat_message` and `room_message` through Bun WebSocket |
 | Reconnect | Retry every 3–5 seconds on connection loss |
 | Message history | Fetched on chat open |
+### 3.3.1 **AI Chatbot Integration** ⭐ NEW
+The ChatrIX app integrates an intelligent AI assistant (Gemini, GPT, or Claude) that users can:
 
+| Feature | Description |
+|----------|--------------|
+| **Tag AI in private chat** | Use `@AI` or `@Chatrix-Bot` syntax in 1-to-1 chats to request answers |
+| **Tag AI in group chat** | Use `@AI` in rooms to ask questions; AI responds in the thread |
+| **Direct AI chat** | Start a dedicated "AI Assistant" chat for private conversations without tagging |
+| **Contextual responses** | AI reads recent conversation context (last 5–10 messages) for relevant answers |
+| **Thinking indicator** | Show typing bubble "AI is thinking..." while processing |
+| **Response format** | AI responses marked with special badge (🤖 AI Response) and distinct styling |
+| **Message citations** | Optional: AI can cite relevant prior messages or user context |
+| **Rate limiting** | Max 50 requests/day per user to prevent abuse |
 ### 3.4 **UI Feedback**
 - Sent → "✓"  
 - Delivered → "✓✓"  
@@ -68,6 +80,131 @@ The design goal:
 | **Code Quality** | Functional components, hooks, PropTypes/TypeScript checks |
 | **Resilience** | Graceful reconnects + error toasts |
 | **Aesthetics** | Minimalist; 3–4 color theme; responsive grid/flex layout |
+
+---
+
+## 4.1 **AI Chatbot Non‑Functional Requirements**
+
+| Category | Specification |
+|-----------|----------------|
+| **AI Provider** | Gemini API, OpenAI GPT-4, or Claude (configurable via env) |
+| **Response latency** | < 5 seconds (including API call + processing) |
+| **Token limit** | 50 requests/day per user (configurable) |
+| **Context window** | Last 5–10 messages from active chat as context |
+| **Error handling** | Graceful fallback messages if API fails; no crashes |
+| **Privacy** | Do NOT send user IDs or sensitive metadata to AI provider; sanitize context |
+| **Rate limiting** | Server-side enforcement; show "limit reached" message when exceeded |
+| **Caching** | Optional: Cache identical prompts within 1 hour to reduce API calls |
+
+---
+
+## 4.2 **AI Chatbot Architecture**
+
+### Backend Changes
+```
+src/
+ ├── ai/
+ │    ├── ai.service.ts        # AI provider integration (Gemini/GPT/Claude)
+ │    ├── ai.controller.ts     # Routes for AI tagging + direct chat
+ │    ├── ai.cache.ts          # Simple request deduplication
+ │    └── ai.types.ts          # TypeScript interfaces
+ ├── chat/
+ │    ├── messages.repo.ts     # Add AI message storage + tagging
+ │    └── rooms.repo.ts        # Mark AI responses in room context
+ └── db/
+      └── models.ts            # Add ai_requests table for rate limiting
+```
+
+### Frontend Changes
+```
+src/
+ ├── components/
+ │    ├── Chat/
+ │    │   └── AIResponseBubble.tsx   # Styled AI message display
+ │    ├── Shared/
+ │    │   └── AIIndicator.tsx        # "AI is thinking..." animation
+ ├── hooks/
+ │    └── useAIChat.ts              # Send tagged messages to AI endpoint
+ └── utils/
+      └── aiPromptBuilder.ts         # Extract context + build prompts
+```
+
+### New REST Endpoints
+```
+POST /api/ai/ask
+  Body: { message: string, chatId: string, type: "direct"|"room", context?: string[] }
+  Response: { id: string, text: string, sourceMessageIds?: string[] }
+
+GET /api/ai/quota
+  Response: { used: number, remaining: number, resetAt: string }
+
+POST /api/ai/chat (Direct AI chat)
+  Body: { message: string, conversationId: string }
+  Response: { id: string, text: string }
+```
+
+### Message Schema Extension
+```ts
+// Add to MessageItem
+interface MessageItem {
+  // ... existing fields
+  isAIResponse?: boolean;           // Mark AI-generated message
+  isAITagged?: boolean;             // Message mentioned @AI
+  aiSourceMessageIds?: string[];    // Messages AI used for context
+  aiProvider?: "gemini" | "gpt-4" | "claude";
+}
+```
+
+---
+
+## 4.3 **AI Chatbot User Experience**
+
+### Direct Tagging in Chat
+```
+User: @AI What's the best way to optimize React performance?
+[AI is thinking... 🤖]
+AI Response: "React performance can be optimized by...
+  • Using React.memo for component memoization
+  • useCallback to prevent unnecessary re-renders
+  • Code splitting with React.lazy()
+  ...more context from your recent messages..."
+```
+
+### Group Room AI Question
+```
+User (in #engineering): @AI summarize the last 5 messages
+[AI is thinking...]
+AI Response: [appears in thread with 🤖 badge]
+  "Based on your conversation:
+  - John proposed using TypeScript
+  - Sarah suggested Tailwind for styling
+  - Summary: The team decided on React + TypeScript + Tailwind..."
+```
+
+### Direct AI Chat (Dedicated)
+```
+Sidebar shows "🤖 AI Assistant" as special contact
+Click → Opens direct chat with AI (no tagging needed)
+User: "How do I implement WebSocket in Bun?"
+[AI is thinking...]
+AI Response: Full explanation with code examples
+```
+
+---
+
+## 4.4 **Implementation Steps**
+
+| Phase | Task | Est. Time |
+|-------|------|-----------|
+| **Phase 1** | Integrate AI provider API (Gemini/OpenAI) | 2 hrs |
+| **Phase 2** | Add rate limiting + quota tracking | 1 hr |
+| **Phase 3** | Create `/api/ai/ask` endpoint | 1.5 hrs |
+| **Phase 4** | Build frontend hook `useAIChat` | 1 hr |
+| **Phase 5** | Style AI responses + typing indicator | 1.5 hrs |
+| **Phase 6** | Add direct AI chat section to sidebar | 1 hr |
+| **Phase 7** | Test tagging in private & group chats | 1 hr |
+
+**Total: ~9 hours** (can run in parallel with existing features)
 
 ---
 
@@ -199,34 +336,44 @@ src/
 
 ---
 
-## 10. **Development Phases**
+## 9. **Development Phases**
 
 | Phase | Deliverable | Description |
 |--------|--------------|-------------|
 | 1 | Project setup | Vite + React + Tailwind + routing |
-| 2 | Auth pages | Integrate Better Auth’s REST endpoints |
+| 2 | Auth pages | Integrate Better Auth's REST endpoints |
 | 3 | Socket hook | Core WebSocket logic (connect/reconnect/send) |
 | 4 | Private chat | Real-time 1‑to‑1 messages |
 | 5 | Group chat | Room-based messaging |
 | 6 | Styling | Tailwind UI pass, responsive polish |
-| 7 | QA | Cross-tab test, refresh persistence |
-| 8 | Docs | Component & event schema documentation |
+| 7 | AI Chatbot | Gemini/GPT integration + tagging + rate limiting |
+| 8 | QA | Cross-tab test, refresh persistence, AI functionality |
+| 9 | Docs | Component & event schema documentation |
 
 ---
 
-## 11. **Testing Plan**
+## 10. **Testing Plan**
 
 - **Functional Tests**
   - Register/login → token stored.  
   - Valid JWT → socket authenticates.  
-  - Message send/receive sync tested with multiple tabs.  
+  - Message send/receive sync tested with multiple tabs.
+  - **AI Chatbot Tests**:
+    - Tag AI in private chat (`@AI What is...?`) → receives response.
+    - Tag AI in room chat → AI responds in thread.
+    - Direct AI chat → messages sent/received without tagging.
+    - Rate limit enforcement (50/day cap).
+    - Quota endpoint returns correct remaining count.
 - **UX Tests**
   - Connection indicator behavior under network off/on.  
   - Scroll behavior auto‑scroll to latest message.  
-  - Light/dark uniform Tailwind styling.  
+  - Light/dark uniform Tailwind styling.
+  - **AI Response styling**: AI messages visually distinct (badge + color).
+  - Typing indicator shows during AI processing.
 - **Performance**
   - Ensure minimal re‑renders (React.memo where needed).  
-  - Socket responds < 50 ms under local host test.
+  - Socket responds < 50 ms under local host test.
+  - **AI response latency**: < 5 seconds end-to-end.
 
 ---
 

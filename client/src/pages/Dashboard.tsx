@@ -126,6 +126,7 @@ const DashboardPage = () => {
     const [unreadDirect, setUnreadDirect] = useState<Record<string, number>>({});
     const [unreadRooms, setUnreadRooms] = useState<Record<string, number>>({});
     const [lastSeenRooms, setLastSeenRooms] = useState<Record<string, string>>({});
+    const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | null>(null);
 
 
 
@@ -431,220 +432,299 @@ const DashboardPage = () => {
     };
 
     return (
-        <div className="min-h-screen bg-[radial-gradient(circle_at_top,#f8fbff_0%,#eef3f9_45%,#e7edf5_100%)] text-slate-900">
-            <div className="mx-auto flex min-h-screen w-full max-w-screen-2xl gap-5 p-4 sm:p-6">
-                <aside className="flex w-72 flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/90 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-                    <div className="border-b border-slate-200 px-5 py-5">
-                        <div className="flex items-start justify-between gap-3">
-                            <div>
-                                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Live Context</p>
-                                <h1 className="mt-2 text-2xl font-semibold text-slate-900">Connections</h1>
-                                <p className="mt-1 text-sm text-slate-500">Choose a user or room to inspect the active target.</p>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setCreateRoomError(null);
-                                    setShowCreateRoomModal(true);
-                                }}
-                                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800"
-                            >
-                                + New Room
-                            </button>
-                        </div>
-                    </div>
+        <div className="relative min-h-screen overflow-hidden bg-[#03030A] text-[#D3D9EB]">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_70%_10%,rgba(86,48,163,0.22)_0%,rgba(5,4,20,0.95)_55%,rgba(3,3,10,1)_100%)]" />
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(118,98,170,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(118,98,170,0.06)_1px,transparent_1px)] bg-size-[220px_220px]" />
 
-                    <div className="flex-1 overflow-y-auto px-4 py-5">
-                        {!session && !isPending && <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">Sign in to load users and rooms.</p>}
-                        {isLoading && <p className="text-sm text-slate-500">Loading connections...</p>}
-                        {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">Error: {error}</p>}
+            <div className="relative flex min-h-screen w-full">
+                {/* Icon Rail */}
+                <aside className="flex w-24 shrink-0 flex-col items-center border-r border-[#24203B] bg-[rgba(2,2,10,0.9)] px-3 py-6">
+                    <button type="button" className="mb-8 inline-flex h-10 w-10 items-center justify-center border border-[#3A3458] bg-[#0C0A1C] text-[#C3BDE0]">
+                        ☁
+                    </button>
 
-                        {/* Direct Section */}
-                        <div className="px-5 mb-4">
-                            <div className="relative">
-                                <input
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder="Search IDs or names..."
-                                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
-                                />
-                                {searchQuery && (
-                                    <button
-                                        onClick={handleSearchID} // We will define this next
-                                        disabled={isSearching}
-                                        className="absolute right-2 top-1.5 rounded-lg bg-sky-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-sky-700"
-                                    >
-                                        {isSearching ? "Finding..." : "Find ID"}
-                                    </button>
-                                )}
-                            </div>
-                        </div>
+                    <button
+                        type="button"
+                        onClick={() => setSidebarMode(sidebarMode === "direct" ? null : "direct")}
+                        className={`mb-4 flex w-full flex-col items-center gap-1 border px-2 py-2 text-[9px] tracking-[0.2em] uppercase transition ${sidebarMode === "direct"
+                            ? "border-[#6C619A] bg-[#15122A] text-[#E6E3F5]"
+                            : "border-transparent text-[#7F78A3] hover:border-[#3A335A] hover:bg-[#0F0C21]"
+                            }`}
+                    >
+                        <span className="text-sm">◉</span>
+                        Direct
+                    </button>
 
-                        <div className="mb-6 mt-5">
-                            <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-slate-400 uppercase">Direct</h3>
-                            <div className="space-y-2">
-                                {sortedFilteredUsers.map(u => (
-                                    <button
-                                        key={u.id}
-                                        type="button"
-                                        onClick={() => setActiveChat({ id: u.id, type: "direct" })}
-                                        className={`flex w-full items-center justify-between rounded-2xl border px-3 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-sky-400 ${activeChat.id === u.id && activeChat.type === "direct" ? "border-sky-200 bg-sky-50 text-sky-950 shadow-sm" : "border-slate-200 bg-white hover:border-sky-200 hover:bg-sky-50"}`}
-                                    >
-                                        <span className="min-w-0">
-                                            <span className="block truncate text-sm font-medium text-slate-900">{u.name || u.email || "Unknown user"}</span>
-                                            <span className="block text-xs text-slate-500">Direct thread</span>
-                                        </span>
-                                        <span className="ml-3 flex items-center gap-2">
-                                            {(unreadDirect[u.id] ?? 0) > 0 && (
-                                                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                                                    {unreadDirect[u.id]}
-                                                </span>
-                                            )}
-                                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">User</span>
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
+                    <button
+                        type="button"
+                        onClick={() => setSidebarMode(sidebarMode === "room" ? null : "room")}
+                        className={`mb-4 flex w-full flex-col items-center gap-1 border px-2 py-2 text-[9px] tracking-[0.2em] uppercase transition ${sidebarMode === "room"
+                            ? "border-[#6C619A] bg-[#15122A] text-[#E6E3F5]"
+                            : "border-transparent text-[#7F78A3] hover:border-[#3A335A] hover:bg-[#0F0C21]"
+                            }`}
+                    >
+                        <span className="text-sm">◎</span>
+                        Rooms
+                    </button>
 
-                        {/* Rooms Section */}
-                        <div>
-                            <h3 className="mb-3 text-xs font-bold tracking-[0.2em] text-slate-400 uppercase">Rooms</h3>
-                            <div className="space-y-2">
-                                {data.rooms.map(r => (
-                                    <button
-                                        key={r.id}
-                                        type="button"
-                                        onClick={() => setActiveChat({ id: r.id, type: "room" })}
-                                        className={`flex w-full items-center justify-between rounded-2xl border px-3 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-emerald-400 ${activeChat.id === r.id && activeChat.type === "room" ? "border-emerald-200 bg-emerald-50 text-emerald-950 shadow-sm" : "border-slate-200 bg-white hover:border-emerald-200 hover:bg-emerald-50"}`}
-                                    >
-                                        <span className="min-w-0">
-                                            <span className="block truncate text-sm font-medium text-slate-900"># {r.name}</span>
-                                            <span className="block text-xs text-slate-500">Room channel</span>
-                                        </span>
-                                        <span className="ml-3 flex items-center gap-2">
-                                            {(unreadRooms[r.id] ?? 0) > 0 && (
-                                                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                                                    {unreadRooms[r.id]}
-                                                </span>
-                                            )}
-                                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-500">Room</span>
-                                        </span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setActiveChat({ id: null, type: null });
+                            setSidebarMode(null);
+                        }}
+                        className="mb-8 flex w-full flex-col items-center gap-1 border border-transparent px-2 py-2 text-[9px] tracking-[0.2em] uppercase text-[#7F78A3] transition hover:border-[#3A335A] hover:bg-[#0F0C21]"
+                    >
+                        <span className="text-sm">◌</span>
+                        Home
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setCreateRoomError(null);
+                            setShowCreateRoomModal(true);
+                        }}
+                        className="inline-flex h-10 w-10 items-center justify-center border border-[#4B426F] bg-[#0E0B21] text-xl text-[#ECE8FB] transition hover:bg-[#181436]"
+                        title="Create room"
+                    >
+                        +
+                    </button>
+
+                    <div className="mt-auto w-full border-t border-[#2B2545] pt-4 text-center">
+                        <p className="text-[8px] tracking-[0.24em] text-[#9087B3] uppercase">Connected</p>
+                        <p className="mt-1 text-[8px] tracking-[0.2em] text-[#635C84]">v1.0.42</p>
                     </div>
                 </aside>
 
-                <main className="flex-1 overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/85 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-                    <div className="flex h-full flex-col">
-                        {activeChat.id ? (
-                            <>
-                                <div className="border-b border-slate-200 px-6 py-5 sm:px-8">
-                                    <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold tracking-[0.2em] text-slate-500 uppercase">
-                                        Active selection
-                                    </div>
-                                    <h2 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Target: {activeChat.id}</h2>
-                                    <p className="mt-2 text-base text-slate-600">Type: {activeChat.type}</p>
-                                </div>
+                {/* Sliding Contacts Drawer */}
+                <div
+                    className={`border-r border-[#24203B] bg-[rgba(8,6,20,0.85)] transition-all duration-300 overflow-hidden ${sidebarMode ? "w-56" : "w-0"
+                        }`}
+                >
+                    <div className="flex h-full flex-col p-4">
+                        <h3 className="mb-4 text-[11px] font-semibold tracking-[0.2em] text-[#D9D2F1] uppercase">
+                            {sidebarMode === "direct" ? "Direct Contacts" : "Rooms"}
+                        </h3>
 
-                                <div className="flex flex-1 flex-col overflow-hidden">
-                                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                                        {messages.length > 0 ? (
-                                            messages.map((msg: MessageItem) => {
-                                                const isMe = msg.senderId === currentUserId;
-                                                return (
-                                                    <div key={msg.id} className={`flex w-full ${isMe ? "justify-end" : "justify-start"}`}>
-                                                        <div
-                                                            className={`max-w-[70%] rounded-[20px] px-4 py-2 shadow-sm ${isMe
-                                                                ? "bg-sky-600 text-white rounded-br-none"
-                                                                : "bg-white border border-slate-200 text-slate-900 rounded-bl-none"
-                                                                }`}
-                                                        >
-                                                            <p className="text-sm leading-relaxed">{msg.content}</p>
-                                                            <div className={`mt-1 flex items-center gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
-                                                                <span className={`block text-[9px] ${isMe ? "text-sky-100" : "text-slate-400"}`}>
-                                                                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                                                </span>
-                                                                {isMe && (
-                                                                    <span className="block text-[9px] font-semibold text-sky-100/90">
-                                                                        {getStatusLabel(msg)}
-                                                                    </span>
-                                                                )}
-                                                            </div>
+                        <div className="flex-1 space-y-1.5 overflow-y-auto">
+                            {sidebarMode === "direct"
+                                ? sortedFilteredUsers.map((u) => (
+                                    <button
+                                        key={u.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setActiveChat({ id: u.id, type: "direct" });
+                                            setSidebarMode(null);
+                                        }}
+                                        className={`flex w-full items-center justify-between rounded border px-2.5 py-2 text-left text-xs transition ${activeChat.id === u.id && activeChat.type === "direct"
+                                                ? "border-[#6C619A] bg-[#1F1A3D] text-[#F0ECFF]"
+                                                : "border-[#2B2450] bg-[#0F0C21] text-[#B8B0DA] hover:border-[#4A4273] hover:bg-[#15112B]"
+                                            }`}
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate font-medium">{u.name || u.email || "Unknown"}</p>
+                                            <p className="text-[9px] tracking-[0.08em] text-[#8178A0]">USER</p>
+                                        </div>
+                                        {(unreadDirect[u.id] ?? 0) > 0 && (
+                                            <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-[#D95A6F] px-1.5 py-0.5 text-[9px] font-bold text-white">
+                                                {unreadDirect[u.id] > 99 ? "99+" : unreadDirect[u.id]}
+                                            </span>
+                                        )}
+                                    </button>
+                                ))
+                                : data.rooms.map((r) => (
+                                    <button
+                                        key={r.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setActiveChat({ id: r.id, type: "room" });
+                                            setSidebarMode(null);
+                                        }}
+                                        className={`flex w-full items-center justify-between rounded border px-2.5 py-2 text-left text-xs transition ${activeChat.id === r.id && activeChat.type === "room"
+                                                ? "border-[#6C619A] bg-[#1F1A3D] text-[#F0ECFF]"
+                                                : "border-[#2B2450] bg-[#0F0C21] text-[#B8B0DA] hover:border-[#4A4273] hover:bg-[#15112B]"
+                                            }`}
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate font-medium"># {r.name}</p>
+                                            <p className="text-[9px] tracking-[0.08em] text-[#8178A0]">ROOM</p>
+                                        </div>
+                                        {(unreadRooms[r.id] ?? 0) > 0 && (
+                                            <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-[#D95A6F] px-1.5 py-0.5 text-[9px] font-bold text-white">
+                                                {unreadRooms[r.id] > 99 ? "99+" : unreadRooms[r.id]}
+                                            </span>
+                                        )}
+                                    </button>
+                                ))}
+                        </div>
+
+                        {!session && !isPending && (
+                            <p className="mt-3 border border-amber-900/40 bg-amber-950/30 px-2 py-2 text-[9px] text-amber-300">Sign in to load contacts.</p>
+                        )}
+                        {isLoading && <p className="mt-3 text-[9px] text-[#8D83B2]">Loading...</p>}
+                        {error && <p className="mt-3 border border-rose-900/50 bg-rose-950/30 px-2 py-2 text-[9px] text-rose-300">Error: {error}</p>}
+                    </div>
+                </div>
+
+                <main className="relative flex-1 overflow-hidden border-l border-[#1D1734] bg-[linear-gradient(145deg,rgba(35,16,66,0.7)_0%,rgba(9,7,30,0.96)_45%,rgba(6,5,20,1)_100%)]">
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_100%_at_20%_10%,rgba(163,140,223,0.18)_0%,rgba(24,18,48,0)_52%)]" />
+
+                    {activeChat.id ? (
+                        <div className="relative flex h-full flex-col">
+                            <div className="flex items-start justify-between border-b border-[#272043] px-8 py-6">
+                                <div>
+                                    <p className="text-[10px] tracking-[0.28em] text-[#8D83B2] uppercase">Active Thread</p>
+                                    <h2 className="mt-2 text-4xl font-semibold tracking-[0.04em] text-[#F1EDFF]">{activeChat.id}</h2>
+                                    <p className="mt-1 text-[11px] tracking-[0.2em] text-[#A79FC8] uppercase">{activeChat.type}</p>
+                                </div>
+                                <div className="text-right text-[10px] tracking-[0.2em] text-[#7C739F] uppercase">REF.00.CHAT</div>
+                            </div>
+
+                            <div className="flex flex-1 flex-col overflow-hidden">
+                                <div className="flex-1 space-y-4 overflow-y-auto px-8 py-6">
+                                    {messages.length > 0 ? (
+                                        messages.map((msg: MessageItem) => {
+                                            const isMe = msg.senderId === currentUserId;
+                                            return (
+                                                <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                                                    <div className={`max-w-[70%] border px-4 py-3 ${isMe
+                                                        ? "border-[#6F62A3] bg-[#2A2248] text-[#F0ECFF]"
+                                                        : "border-[#3A335D] bg-[#14102B] text-[#CDC6EA]"
+                                                        }`}>
+                                                        <p className="text-sm leading-relaxed">{msg.content}</p>
+                                                        <div className="mt-2 flex items-center gap-2 text-[10px] tracking-[0.12em] uppercase">
+                                                            <span className={isMe ? "text-[#BBB1DF]" : "text-[#8D83B2]"}>
+                                                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                                            </span>
+                                                            {isMe && <span className="text-[#CFC6EF]">{getStatusLabel(msg)}</span>}
                                                         </div>
                                                     </div>
-                                                );
-                                            })
-                                        ) : (
-                                            <p className="mt-10 text-center text-slate-400">No messages yet. Say hi!</p>
-                                        )}
-                                        <div ref={scrollRef} />
-                                    </div>
-
-                                    <div className="border-t border-slate-200 px-6 py-5 sm:px-8">
-                                        <form className="flex gap-2" onSubmit={handleSendMessage}>
-                                            <input
-                                                name="msg"
-                                                value={messageDraft}
-                                                onChange={(event) => setMessageDraft(event.target.value)}
-                                                className="flex-1 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:border-sky-400 focus:outline-none"
-                                                placeholder="Type a test message..."
-                                            />
-                                            <button
-                                                disabled={isSending}
-                                                className="rounded-2xl bg-slate-900 px-6 py-3 text-sm font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-                                            >
-                                                {isSending ? "Sending..." : "Send"}
-                                            </button>
-                                        </form>
-                                        {sendError && <p className="mt-2 text-left text-sm text-rose-600">{sendError}</p>}
-                                    </div>
+                                                </div>
+                                            );
+                                        })
+                                    ) : (
+                                        <div className="mx-auto mt-16 max-w-3xl border border-[#3A335D] bg-[#15112B]/80 p-8">
+                                            <p className="text-3xl font-semibold tracking-[0.02em] text-[#F0ECFF]">NO ACTIVE THREAD</p>
+                                            <p className="mt-4 text-[11px] tracking-[0.16em] text-[#9C93BE] uppercase">
+                                                Your workspace is quiet. Dive back into your recent conversations.
+                                            </p>
+                                        </div>
+                                    )}
+                                    <div ref={scrollRef} />
                                 </div>
-                            </>
-                        ) : (
-                            <div className="flex flex-1 items-center justify-center p-6 sm:p-10">
-                                <div className="max-w-lg text-center">
-                                    <h2 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Pick a conversation</h2>
-                                    <p className="mt-3 text-base text-slate-600">Choose a direct user or room from the left to load its state here.</p>
+
+                                <div className="border-t border-[#2B2448] bg-[#0E0A21] px-8 py-5">
+                                    <form className="flex gap-2" onSubmit={handleSendMessage}>
+                                        <input
+                                            name="msg"
+                                            value={messageDraft}
+                                            onChange={(event) => setMessageDraft(event.target.value)}
+                                            className="flex-1 border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
+                                            placeholder="Transmit message..."
+                                        />
+                                        <button
+                                            disabled={isSending}
+                                            className="border border-[#554A80] bg-[#251E42] px-6 py-3 text-xs font-semibold tracking-[0.18em] text-[#F4F0FF] uppercase transition hover:bg-[#32275A] disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {isSending ? "Sending" : "Send"}
+                                        </button>
+                                    </form>
+                                    {sendError && <p className="mt-2 text-xs text-rose-300">{sendError}</p>}
                                 </div>
                             </div>
-                        )}
-                    </div>
+                        </div>
+                    ) : (
+                        <div className="relative flex h-full flex-col px-6 py-4 sm:px-8 sm:py-5">
+                            <div className="flex items-start justify-between">
+                                <div>
+                                    <h1 className="text-5xl font-bold leading-none tracking-[0.02em] text-[#F6F2FF]">CHATRIX</h1>
+                                    <p className="mt-1 text-[10px] tracking-[0.3em] text-[#958BB8] uppercase">STUDIO v1.0</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={handleSearchID}
+                                    disabled={!searchQuery || isSearching}
+                                    className="inline-flex h-8 w-8 items-center justify-center border border-[#463D6A] bg-[#1A1434] text-[#D4CCEE] transition hover:bg-[#241C46] disabled:cursor-not-allowed disabled:opacity-50"
+                                    title="Search user by ID"
+                                >
+                                    ⌕
+                                </button>
+                            </div>
+
+                            <div className="mt-6 max-w-md">
+                                <input
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Paste user ID or name"
+                                    className="w-full border border-[#403760] bg-[#120E2A] px-3 py-2 text-[11px] tracking-[0.08em] text-[#D6D0EF] outline-none placeholder:text-[#7D73A0] focus:border-[#6C619A]"
+                                />
+                            </div>
+
+                            <div className="mt-8 max-w-4xl">
+                                <p className="text-[11px] tracking-[0.28em] text-[#9E96C1] uppercase">Select a conversation to start messaging</p>
+                                <h2 className="mt-2 text-[clamp(54px,9vw,112px)] font-black leading-none tracking-[0.01em] text-[#FFFFFF1A]">CHATS</h2>
+                            </div>
+
+                            <div className="mt-10 flex items-center gap-3 text-[11px] tracking-[0.24em] text-[#7E75A5] uppercase">
+                                <span className="inline-flex h-9 w-9 items-center justify-center border border-[#3D345E] bg-[#120E28]">◧</span>
+                                REF.00.CHAT
+                            </div>
+
+                            <div className="mt-8 max-w-4xl border border-[#3A325B] bg-[#1A1434]/75 px-6 py-6">
+                                <p className="text-3xl font-semibold tracking-[0.01em] text-[#F3EEFF]">NO ACTIVE THREAD</p>
+                                <p className="mt-3 text-[11px] tracking-[0.15em] text-[#A298C3] uppercase">
+                                    Your workspace is quiet. Dive back into your recent conversations or start a new connection.
+                                </p>
+                            </div>
+
+                            <div className="mt-8 flex flex-wrap items-center gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSidebarMode("direct");
+                                    }}
+                                    className="border border-[#E7E3F5] bg-[#F4F1FA] px-10 py-4 text-xs font-bold tracking-[0.28em] text-[#090814] uppercase transition hover:bg-white"
+                                >
+                                    Start A Discussion
+                                </button>
+                                <span className="text-[10px] tracking-[0.22em] text-[#766C9B] uppercase">ACTION.EXE</span>
+                            </div>
+                        </div>
+                    )}
                 </main>
-            </div >
+            </div>
 
             {showCreateRoomModal && (
-                <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-                    <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-                        <h3 className="text-lg font-semibold text-slate-900">Create New Room</h3>
-                        <p className="mt-1 text-sm text-slate-500">Give your room a clear, short name.</p>
+                <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4">
+                    <div className="w-full max-w-md border border-[#2C3D5D] bg-[#0A111D] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.65)]">
+                        <h3 className="text-lg font-semibold tracking-[0.08em] text-[#D7E2F8]">Create New Room</h3>
+                        <p className="mt-1 text-xs tracking-[0.14em] text-[#7288AF] uppercase">Give your room a clear, short name.</p>
 
                         <form className="mt-4 space-y-3" onSubmit={handleCreateRoom}>
                             <input
                                 value={newRoomName}
                                 onChange={(e) => setNewRoomName(e.target.value)}
                                 placeholder="e.g. design-ops"
-                                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
+                                className="w-full border border-[#253653] bg-[#0D1523] px-3 py-2 text-sm text-[#CFDCF6] outline-none placeholder:text-[#60769D] focus:border-[#4A638F]"
                             />
 
                             {createRoomError && (
-                                <p className="text-sm text-rose-600">{createRoomError}</p>
+                                <p className="text-sm text-rose-400">{createRoomError}</p>
                             )}
 
                             <div className="flex justify-end gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setShowCreateRoomModal(false)}
-                                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                                    className="border border-[#2F4160] px-3 py-2 text-sm text-[#A9BCDE] hover:bg-[#132035]"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={isCreatingRoom}
-                                    className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-70"
+                                    className="border border-[#3F557C] bg-[#1F3354] px-3 py-2 text-sm font-bold text-[#D7E3FA] hover:bg-[#2A4471] disabled:opacity-70"
                                 >
                                     {isCreatingRoom ? "Creating..." : "Create Room"}
                                 </button>

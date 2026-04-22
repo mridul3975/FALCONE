@@ -35,6 +35,14 @@
 | GET | /rooms | List all rooms |
 | POST | /rooms/create | Create a new room |
 
+### AI Chatbot Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | /ai/ask | Send tagged message to AI (in private or room chat) |
+| GET | /ai/quota | Check user's daily AI request quota |
+| POST | /ai/chat | Direct message to AI in dedicated AI chat |
+
 ## 4. Data Model (SQLite)
 
 ### Auth Tables (Better Auth Managed)
@@ -49,6 +57,8 @@
 - rooms (id, name, createdAt)
 - room_members (roomId, userId)
 - messages (id, senderId, receiverId, roomId, text, status, timestamp)
+- ai_requests (id, userId, requestCount, resetAt) -- Rate limiting
+- ai_conversations (id, userId, createdAt) -- Direct AI chat history (optional)
 
 ## 5. Directory Structure
 
@@ -59,8 +69,11 @@ src/
 	chat/
 		chat.server.ts   # WebSocket handlers (upcoming)
 		messages.repo.ts # Message DB queries (upcoming)
-		rooms.repo.ts    # Room DB queries (upcoming)
-	db/
+		rooms.repo.ts    # Room DB queries (upcoming)	ai/                  # NEW: AI Chatbot Service
+		ai.service.ts    # Gemini/GPT/Claude integration
+		ai.controller.ts # AI endpoints & logic
+		ai.cache.ts      # Request deduplication
+		ai.types.ts      # TypeScript interfaces	db/
 		connection.ts    # SQLite instance
 		models.ts        # SQL table creation and migrations
 	utils/
@@ -75,4 +88,4 @@ src/
 - Phase 2 (In Progress): Implement WebSocket session auth during upgrade handshake.
 - Phase 3 (Planned): Basic private chat (live send/receive).
 - Phase 4 (Planned): Message persistence in SQLite.
-- Phase 5 (Planned): Group rooms (join, leave, broadcast workflows).
+- Phase 5 (Planned): Group rooms (join, leave, broadcast workflows).- Phase 6 (Planned): AI Chatbot integration (Gemini/GPT/Claude API, tagging, rate limiting).
