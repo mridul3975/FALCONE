@@ -96,7 +96,38 @@ export function initDb() {
     )
   `).run();
 
+  //ai conversations
+  function ensureAiTables() {
+    db.query(`
+    CREATE TABLE IF NOT EXISTS ai_requests (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL UNIQUE,
+      requestCount INTEGER NOT NULL DEFAULT 0,
+      resetAt DATETIME NOT NULL,
+      updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
+    )
+  `).run();
+
+    db.query(`
+    CREATE TABLE IF NOT EXISTS ai_conversations (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      title TEXT,
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
+    )
+  `).run();
+
+    db.query(`CREATE INDEX IF NOT EXISTS idx_ai_requests_resetAt ON ai_requests(resetAt)`).run();
+    db.query(`CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_created ON ai_conversations(userId, createdAt DESC)`).run();
+  }
+
   ensureMessageColumns();
+  ensureAiTables();
+
+
 
   console.log("🗄️  Database schema initialized (Auth + Chat Tables complete)");
 }

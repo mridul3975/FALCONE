@@ -6,12 +6,14 @@ import { roomRepo } from "./chat/rooms.repo";
 import { getRoomMessages } from "./chat/rooms.repo";
 import { networkInterfaces } from "node:os";
 import db from "./db/connection";
+import { env } from "./config/env";
+
 
 // Initialize Database Schema
 initDb();
 
-const PORT = Number(process.env.PORT ?? 3000);
-const HOST = process.env.HOST ?? "0.0.0.0";
+const PORT = env.PORT;
+const HOST = env.HOST;
 
 const DEV_CLIENT_PORTS = [3000, 4173, 5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180];
 
@@ -35,10 +37,7 @@ const defaultAllowedOrigins = defaultHosts.flatMap((host) =>
     DEV_CLIENT_PORTS.map((port) => `http://${host}:${port}`),
 );
 
-const envAllowedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+const envAllowedOrigins = env.TRUSTED_ORIGINS;
 
 const allowedOrigins = new Set([...defaultAllowedOrigins, ...envAllowedOrigins]);
 
