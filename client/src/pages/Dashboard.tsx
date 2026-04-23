@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { getBearerToken, useSession } from "../api/auth";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 
 interface ActiveUser {
     id: string | null;
@@ -618,7 +621,42 @@ const DashboardPage = () => {
                                                         ? "border-[#6F62A3] bg-[#2A2248] text-[#F0ECFF]"
                                                         : "border-[#3A335D] bg-[#14102B] text-[#CDC6EA]"
                                                         }`}>
-                                                        <p className="text-sm leading-relaxed">{msg.content}</p>
+                                                        {msg.senderId === "gemini-bot" ? (
+                                                            <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                                                                <ReactMarkdown
+                                                                    remarkPlugins={[remarkGfm]}
+                                                                    rehypePlugins={[rehypeSanitize]}
+                                                                    components={{
+                                                                        h1: ({ children }) => <h1 className="text-base font-semibold mt-2 mb-1">{children}</h1>,
+                                                                        h2: ({ children }) => <h2 className="text-sm font-semibold mt-2 mb-1">{children}</h2>,
+                                                                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                                                        ul: ({ children }) => <ul className="list-disc pl-5 mb-2">{children}</ul>,
+                                                                        ol: ({ children }) => <ol className="list-decimal pl-5 mb-2">{children}</ol>,
+                                                                        li: ({ children }) => <li className="mb-1">{children}</li>,
+                                                                        code: ({ children }) => (
+                                                                            <code className="rounded bg-black/30 px-1 py-0.5 text-xs">{children}</code>
+                                                                        ),
+                                                                        pre: ({ children }) => (
+                                                                            <pre className="my-2 overflow-x-auto rounded bg-black/35 p-3 text-xs">{children}</pre>
+                                                                        ),
+                                                                        a: ({ href, children }) => (
+                                                                            <a
+                                                                                href={href}
+                                                                                target="_blank"
+                                                                                rel="noreferrer"
+                                                                                className="underline text-[#9fd2ff]"
+                                                                            >
+                                                                                {children}
+                                                                            </a>
+                                                                        ),
+                                                                    }}
+                                                                >
+                                                                    {msg.content}
+                                                                </ReactMarkdown>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+                                                        )}
                                                         <div className="mt-2 flex items-center gap-2 text-[10px] tracking-[0.12em] uppercase">
                                                             <span className={isMe ? "text-[#BBB1DF]" : "text-[#8D83B2]"}>
                                                                 {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}

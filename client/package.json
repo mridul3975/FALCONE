@@ -13,7 +13,10 @@
     "better-auth": "^1.6.5",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.14.1",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
     "sidebar": "^1.0.2",
     "types": "^0.1.1"
   },
