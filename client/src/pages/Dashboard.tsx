@@ -58,6 +58,12 @@ const mapServerMessage = (msg: ServerMessage): MessageItem => ({
     readAt: msg.readAt ?? null,
 });
 
+const normalizeSearchText = (value: string) =>
+    value
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, " ");
+
 const getStatusLabel = (msg: MessageItem) => {
     if (msg.status === "read") return "Read";
     if (msg.status === "delivered") return "Delivered";
@@ -133,13 +139,54 @@ const DashboardPage = () => {
 
 
 
-    const handleSearchID = async () => {
+    const handleSearchID = async (event?: React.FormEvent<HTMLFormElement>) => {
+        event?.preventDefault();
         setIsSearching(true);
         try {
             const bearerToken = getBearerToken();
-            const userId = searchQuery.trim();
+            const rawQuery = searchQuery.trim();
 
-            const res = await fetch(`http://localhost:3000/api/users/${userId}`, {
+            if (!rawQuery) {
+                return;
+            }
+
+            const query = normalizeSearchText(rawQuery);
+            const findInUsers = (users: UserItem[]) =>
+                users.find((u) => {
+                    const name = normalizeSearchText(u.name ?? "");
+                    const email = normalizeSearchText(u.email ?? "");
+                    const id = normalizeSearchText(u.id);
+
+                    return name.includes(query) || email.includes(query) || id === query;
+                });
+
+            const localMatch = findInUsers(data.users);
+
+            if (localMatch) {
+                setActiveChat({ id: localMatch.id, type: "direct" });
+                setSearchQuery("");
+                return;
+            }
+
+            if (bearerToken) {
+                const usersRes = await fetch("http://localhost:3000/api/users", {
+                    headers: { Authorization: `Bearer ${bearerToken}` },
+                });
+
+                if (usersRes.ok) {
+                    const users = (await usersRes.json()) as UserItem[];
+                    setData((prev) => ({ ...prev, users }));
+
+                    const refreshedMatch = findInUsers(users);
+                    if (refreshedMatch) {
+                        setActiveChat({ id: refreshedMatch.id, type: "direct" });
+                        setSearchQuery("");
+                        return;
+                    }
+                }
+            }
+
+            const res = await fetch(`http://localhost:3000/api/users/${rawQuery}`, {
                 headers: {
                     Authorization: `Bearer ${bearerToken}`,
                 },
@@ -153,7 +200,7 @@ const DashboardPage = () => {
                 }));
                 setSearchQuery("");
             } else {
-                alert("User ID not found.");
+                alert("User not found.");
             }
         } catch (err) {
             console.error("Search failed", err);
@@ -197,7 +244,7 @@ const DashboardPage = () => {
         }, 10000);
 
         return () => clearInterval(id);
-    }, [session]);
+    }, [session, activeChat.id, activeChat.type, lastSeenRooms]);
 
 
     type SendMessageResponse =
@@ -359,6 +406,24 @@ const DashboardPage = () => {
             scrollRef.current.scrollIntoView({ behavior: "smooth" });
         }
     }, [messages]);
+
+    useEffect(() => {
+        if (activeChat.type !== "room" || !activeChat.id || messages.length === 0) {
+            return;
+        }
+
+        const latestVisible = messages[messages.length - 1]?.createdAt;
+        if (!latestVisible) {
+            return;
+        }
+
+        setLastSeenRooms((prev) => {
+            if (prev[activeChat.id as string] === latestVisible) {
+                return prev;
+            }
+            return { ...prev, [activeChat.id as string]: latestVisible };
+        });
+    }, [activeChat.id, activeChat.type, messages]);
     const refreshUnreadCounts = async (
         usersList: UserItem[] = data.users,
         roomsList: RoomItem[] = data.rooms,
@@ -387,6 +452,8 @@ const DashboardPage = () => {
             }),
         );
 
+        const seenRoomUpdates: Record<string, string> = {};
+
         const roomCounts = await Promise.all(
             roomsList.map(async (r) => {
                 try {
@@ -396,7 +463,17 @@ const DashboardPage = () => {
                     if (!res.ok) return [r.id, 0] as const;
 
                     const history = (await res.json()) as RoomHistoryMessage[];
-                    const seenAt = lastSeenRooms[r.id];
+                    const latest = history.length > 0 ? history[history.length - 1]?.timestamp : undefined;
+
+                    if (activeChat.type === "room" && activeChat.id === r.id && latest) {
+                        seenRoomUpdates[r.id] = latest;
+                    }
+
+                    const seenAt =
+                        activeChat.type === "room" && activeChat.id === r.id
+                            ? latest ?? lastSeenRooms[r.id]
+                            : lastSeenRooms[r.id];
+
                     const count = history.filter((m) => {
                         if (m.senderId === currentUserId) return false;
                         if (!seenAt) return true;
@@ -409,6 +486,10 @@ const DashboardPage = () => {
                 }
             }),
         );
+
+        if (Object.keys(seenRoomUpdates).length > 0) {
+            setLastSeenRooms((prev) => ({ ...prev, ...seenRoomUpdates }));
+        }
 
         setUnreadDirect(Object.fromEntries(directCounts));
         setUnreadRooms(Object.fromEntries(roomCounts));
@@ -461,11 +542,11 @@ const DashboardPage = () => {
     };
 
     return (
-        <div className="relative min-h-screen overflow-hidden bg-[#03030A] text-[#D3D9EB]">
+        <div className="relative h-screen overflow-hidden bg-[#03030A] text-[#D3D9EB]">
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_70%_10%,rgba(86,48,163,0.22)_0%,rgba(5,4,20,0.95)_55%,rgba(3,3,10,1)_100%)]" />
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(118,98,170,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(118,98,170,0.06)_1px,transparent_1px)] bg-size-[220px_220px]" />
 
-            <div className="relative flex min-h-screen w-full">
+            <div className="relative flex h-full w-full">
                 {/* Icon Rail */}
                 <aside className="flex w-24 shrink-0 flex-col items-center border-r border-[#24203B] bg-[rgba(2,2,10,0.9)] px-3 py-6">
                     <button type="button" className="mb-8 inline-flex h-10 w-10 items-center justify-center border border-[#3A3458] bg-[#0C0A1C] text-[#C3BDE0]">
@@ -622,7 +703,7 @@ const DashboardPage = () => {
                                                         : "border-[#3A335D] bg-[#14102B] text-[#CDC6EA]"
                                                         }`}>
                                                         {msg.senderId === "gemini-bot" ? (
-                                                            <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                                                            <div className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">
                                                                 <ReactMarkdown
                                                                     remarkPlugins={[remarkGfm]}
                                                                     rehypePlugins={[rehypeSanitize]}
@@ -655,7 +736,7 @@ const DashboardPage = () => {
                                                                 </ReactMarkdown>
                                                             </div>
                                                         ) : (
-                                                            <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.content}</p>
+                                                            <p className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">{msg.content}</p>
                                                         )}
                                                         <div className="mt-2 flex items-center gap-2 text-[10px] tracking-[0.12em] uppercase">
                                                             <span className={isMe ? "text-[#BBB1DF]" : "text-[#8D83B2]"}>
@@ -705,25 +786,26 @@ const DashboardPage = () => {
                                     <h1 className="text-5xl font-bold leading-none tracking-[0.02em] text-[#F6F2FF]">CHATRIX</h1>
                                     <p className="mt-1 text-[10px] tracking-[0.3em] text-[#958BB8] uppercase">STUDIO v1.0</p>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={handleSearchID}
-                                    disabled={!searchQuery || isSearching}
-                                    className="inline-flex h-8 w-8 items-center justify-center border border-[#463D6A] bg-[#1A1434] text-[#D4CCEE] transition hover:bg-[#241C46] disabled:cursor-not-allowed disabled:opacity-50"
-                                    title="Search user by ID"
-                                >
-                                    ⌕
-                                </button>
+                                <form onSubmit={handleSearchID}>
+                                    <button
+                                        type="submit"
+                                        disabled={!searchQuery || isSearching}
+                                        className="inline-flex h-8 w-8 items-center justify-center border border-[#463D6A] bg-[#1A1434] text-[#D4CCEE] transition hover:bg-[#241C46] disabled:cursor-not-allowed disabled:opacity-50"
+                                        title="Search user by ID or name"
+                                    >
+                                        ⌕
+                                    </button>
+                                </form>
                             </div>
 
-                            <div className="mt-6 max-w-md">
+                            <form className="mt-6 max-w-md" onSubmit={handleSearchID}>
                                 <input
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     placeholder="Paste user ID or name"
                                     className="w-full border border-[#403760] bg-[#120E2A] px-3 py-2 text-[11px] tracking-[0.08em] text-[#D6D0EF] outline-none placeholder:text-[#7D73A0] focus:border-[#6C619A]"
                                 />
-                            </div>
+                            </form>
 
                             <div className="mt-8 max-w-4xl">
                                 <p className="text-[11px] tracking-[0.28em] text-[#9E96C1] uppercase">Select a conversation to start messaging</p>

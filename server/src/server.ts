@@ -194,25 +194,33 @@ LIMIT 50
             }
 
             const rawUserId = url.pathname.split("/").filter(Boolean).pop();
-            const userId = rawUserId ? decodeURIComponent(rawUserId).trim() : "";
+            const userLookupKey = rawUserId ? decodeURIComponent(rawUserId).trim() : "";
 
             console.log("rawUserId:", rawUserId);
-            console.log("decoded userId:", userId);
+            console.log("decoded userId:", userLookupKey);
             console.log("current session user:", session.user.id);
 
-            if (!userId) {
+            if (!userLookupKey) {
                 console.log("missing user id");
                 return withCors(req, new Response("Bad Request: Missing user ID", { status: 400 }));
             }
 
             const user = db
                 .query(`
-    SELECT id, name, email, image
-    FROM user
-    WHERE id = $userId
-    LIMIT 1
-  `)
-                .get({ $userId: userId }) as { // Added the $ to the key here
+        SELECT id, name, email, image
+        FROM user
+        WHERE id = $lookup
+            OR LOWER(name) LIKE LOWER($likeLookup)
+            OR LOWER(email) LIKE LOWER($likeLookup)
+        ORDER BY
+            CASE WHEN id = $lookup THEN 0 ELSE 1 END,
+            updatedAt DESC
+        LIMIT 1
+    `)
+                .get({
+                    $lookup: userLookupKey,
+                    $likeLookup: `%${userLookupKey}%`,
+                }) as {
                     id: string;
                     name: string;
                     email: string;
@@ -336,117 +344,123 @@ LIMIT 50
 
 
 
-if (url.pathname === "/api/messages" && req.method === "POST") {
-    const session = await auth.api.getSession({ headers: req.headers });
-    if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+        if (url.pathname === "/api/messages" && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
 
-    type MessageRequest = { targetId?: string; content?: string; type?: "direct" | "room" };
-    const body = (await req.json().catch(() => null)) as MessageRequest | null;
-    const targetId = body?.targetId;
-    const content = body?.content;
-    const type = body?.type; // "direct" or "room"
+            type MessageRequest = { targetId?: string; content?: string; type?: "direct" | "room" };
+            const body = (await req.json().catch(() => null)) as MessageRequest | null;
+            const targetId = body?.targetId;
+            const content = body?.content;
+            const type = body?.type; // "direct" or "room"
 
-    if (!targetId || typeof content !== "string" || !type) {
-        return withCors(req, new Response("Bad Request", { status: 400 }));
-    }
-
-    try {
-        if (type === "direct") {
-            const normalizedContent = content.trim();
-            if (!normalizedContent) {
-                return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
+            if (!targetId || typeof content !== "string" || !type) {
+                return withCors(req, new Response("Bad Request", { status: 400 }));
             }
 
-            const userMessage = messageRepo.savePrivateMessage(
-                session.user.id,
-                targetId,
-                normalizedContent,
-            );
+            try {
+                if (type === "direct") {
+                    const normalizedContent = content.trim();
+                    if (!normalizedContent) {
+                        return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
+                    }
 
-            const isGeminiTarget = targetId === GEMINI_BOT_ID;
-            const geminiMatch = normalizedContent.match(/^@gemini\s+(.+)$/i);
-            const promptFromTag = geminiMatch?.[1]?.trim();
-            const shouldTriggerGemini = isGeminiTarget || Boolean(promptFromTag);
+                    const userMessage = messageRepo.savePrivateMessage(
+                        session.user.id,
+                        targetId,
+                        normalizedContent,
+                    );
 
-            if (!shouldTriggerGemini) {
-                return withCors(
-                    req,
-                    new Response(JSON.stringify(userMessage), {
-                        headers: { "Content-Type": "application/json" },
-                    }),
-                );
+                    const isGeminiTarget = targetId === GEMINI_BOT_ID;
+                    const geminiMatch = normalizedContent.match(/^@gemini\s+(.+)$/i);
+                    const promptFromTag = geminiMatch?.[1]?.trim();
+                    const shouldTriggerGemini = isGeminiTarget || Boolean(promptFromTag);
+
+                    if (!shouldTriggerGemini) {
+                        return withCors(
+                            req,
+                            new Response(JSON.stringify(userMessage), {
+                                headers: { "Content-Type": "application/json" },
+                            }),
+                        );
+                    }
+
+                    const prompt = isGeminiTarget
+                        ? normalizedContent.replace(/^@gemini\s+/i, "").trim() || normalizedContent
+                        : (promptFromTag as string);
+
+                    const aiText = await askGemini(prompt);
+                    const aiReplyText = aiText || "Sorry, I could not generate a response right now.";
+
+                    const aiSenderId = isGeminiTarget ? GEMINI_BOT_ID : session.user.id;
+                    const aiReceiverId = isGeminiTarget ? session.user.id : targetId;
+                    const aiMessageContent = isGeminiTarget ? aiReplyText : `Gemini:\n${aiReplyText}`;
+
+                    const aiMessage = messageRepo.savePrivateMessage(
+                        aiSenderId,
+                        aiReceiverId,
+                        aiMessageContent,
+                    );
+
+                    return withCors(
+                        req,
+                        new Response(
+                            JSON.stringify({
+                                userMessage,
+                                aiMessage,
+                            }),
+                            { headers: { "Content-Type": "application/json" } },
+                        ),
+                    );
+                }
+                if (type === "room") {
+                    const normalizedContent = content.trim();
+                    if (!normalizedContent) {
+                        return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
+                    }
+
+                    const userMessage = roomRepo.saveRoomMessage(session.user.id, targetId, normalizedContent);
+
+                    const geminiMatch = normalizedContent.match(/^@gemini\s+(.+)$/i);
+
+                    if (!geminiMatch) {
+                        return withCors(req, new Response(JSON.stringify(userMessage), {
+                            headers: { "Content-Type": "application/json" },
+                        }));
+                    }
+
+                    const prompt = geminiMatch[1]?.trim();
+                    if (!prompt) {
+                        return withCors(req, new Response(JSON.stringify(userMessage), {
+                            headers: { "Content-Type": "application/json" },
+                        }));
+                    }
+
+                    const aiText = await askGemini(prompt);
+                    const aiMessage = roomRepo.saveRoomMessage(
+                        GEMINI_BOT_ID,
+                        targetId,
+                        aiText || "Sorry, I could not generate a response right now.",
+                    );
+
+                    return withCors(
+                        req,
+                        new Response(
+                            JSON.stringify({
+                                userMessage,
+                                aiMessage,
+                            }),
+                            { headers: { "Content-Type": "application/json" } },
+                        ),
+                    );
+                }
+
+                return withCors(req, new Response("Bad Request: Invalid message type", { status: 400 }));
+            } catch (error) {
+                console.error("Error processing message:", error);
+                return withCors(req, new Response("Internal Server Error", { status: 500 }));
             }
-
-            const prompt = isGeminiTarget
-                ? normalizedContent.replace(/^@gemini\s+/i, "").trim() || normalizedContent
-                : (promptFromTag as string);
-
-            const aiText = await askGemini(prompt);
-            const aiMessage = messageRepo.savePrivateMessage(
-                GEMINI_BOT_ID,
-                session.user.id,
-                aiText || "Sorry, I could not generate a response right now.",
-            );
-
-            return withCors(
-                req,
-                new Response(
-                    JSON.stringify({
-                        userMessage,
-                        aiMessage,
-                    }),
-                    { headers: { "Content-Type": "application/json" } },
-                ),
-            );
         }
-        if (type === "room") {
-            const normalizedContent = content.trim();
-            if (!normalizedContent) {
-                return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
-            }
-
-            const userMessage = roomRepo.saveRoomMessage(session.user.id, targetId, normalizedContent);
-
-            const geminiMatch = normalizedContent.match(/^@gemini\s+(.+)$/i);
-
-            if (!geminiMatch) {
-                return withCors(req, new Response(JSON.stringify(userMessage), {
-                    headers: { "Content-Type": "application/json" },
-                }));
-            }
-
-            const prompt = geminiMatch[1]?.trim();
-            if (!prompt) {
-                return withCors(req, new Response(JSON.stringify(userMessage), {
-                    headers: { "Content-Type": "application/json" },
-                }));
-            }
-
-            const aiText = await askGemini(prompt);
-            const aiMessage = roomRepo.saveRoomMessage(
-                GEMINI_BOT_ID,
-                targetId,
-                aiText || "Sorry, I could not generate a response right now.",
-            );
-
-            return withCors(
-                req,
-                new Response(
-                    JSON.stringify({
-                        userMessage,
-                        aiMessage,
-                    }),
-                    { headers: { "Content-Type": "application/json" } },
-                ),
-            );
-        }
-
-        return withCors(req, new Response("Bad Request: Invalid message type", { status: 400 }));
-    } catch (error) {
-        console.error("Error processing message:", error);
-        return withCors(req, new Response("Internal Server Error", { status: 500 }));
-    }
-}
 
         const roomMessageMatch = url.pathname.match(/^\/api\/rooms\/([^\/]+)\/messages$/);
         if (roomMessageMatch && req.method === "GET") {
