@@ -336,73 +336,111 @@ LIMIT 50
 
 
 
-        if (url.pathname === "/api/messages" && req.method === "POST") {
-            const session = await auth.api.getSession({ headers: req.headers });
-            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+if (url.pathname === "/api/messages" && req.method === "POST") {
+    const session = await auth.api.getSession({ headers: req.headers });
+    if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
 
-            type MessageRequest = { targetId?: string; content?: string; type?: "direct" | "room" };
-            const body = (await req.json().catch(() => null)) as MessageRequest | null;
-            const targetId = body?.targetId;
-            const content = body?.content;
-            const type = body?.type; // "direct" or "room"
+    type MessageRequest = { targetId?: string; content?: string; type?: "direct" | "room" };
+    const body = (await req.json().catch(() => null)) as MessageRequest | null;
+    const targetId = body?.targetId;
+    const content = body?.content;
+    const type = body?.type; // "direct" or "room"
 
-            if (!targetId || typeof content !== "string" || !type) {
-                return withCors(req, new Response("Bad Request", { status: 400 }));
+    if (!targetId || typeof content !== "string" || !type) {
+        return withCors(req, new Response("Bad Request", { status: 400 }));
+    }
+
+    try {
+        if (type === "direct") {
+            const normalizedContent = content.trim();
+            if (!normalizedContent) {
+                return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
             }
 
-            try {
-                if (type === "direct") {
-                    const normalizedContent = content.trim();
-                    if (!normalizedContent) {
-                        return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
-                    }
+            const userMessage = messageRepo.savePrivateMessage(
+                session.user.id,
+                targetId,
+                normalizedContent,
+            );
 
-                    const userMessage = messageRepo.savePrivateMessage(
-                        session.user.id,
-                        targetId,
-                        normalizedContent,
-                    );
+            const isGeminiTarget = targetId === GEMINI_BOT_ID;
 
-                    const isGeminiTarget = targetId === GEMINI_BOT_ID;
-
-                    if (!isGeminiTarget) {
-                        return withCors(
-                            req,
-                            new Response(JSON.stringify(userMessage), {
-                                headers: { "Content-Type": "application/json" },
-                            }),
-                        );
-                    }
-
-                    const aiText = await askGemini(normalizedContent);
-                    const aiMessage = messageRepo.savePrivateMessage(
-                        GEMINI_BOT_ID,
-                        session.user.id,
-                        aiText || "Sorry, I could not generate a response right now.",
-                    );
-
-                    return withCors(
-                        req,
-                        new Response(
-                            JSON.stringify({
-                                userMessage,
-                                aiMessage,
-                            }),
-                            { headers: { "Content-Type": "application/json" } },
-                        ),
-                    );
-                } else if (type === "room") {
-                    const saved = roomRepo.saveRoomMessage(session.user.id, targetId, content);
-                    const payload = saved;
-                    return withCors(req, new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } }));
-                } else {
-                    return withCors(req, new Response("Bad Request: unknown message type", { status: 400 }));
-                }
-            } catch (err) {
-                console.error("❌ Error saving message:", err);
-                return withCors(req, new Response("Internal Server Error", { status: 500 }));
+            if (!isGeminiTarget) {
+                return withCors(
+                    req,
+                    new Response(JSON.stringify(userMessage), {
+                        headers: { "Content-Type": "application/json" },
+                    }),
+                );
             }
+
+            const aiText = await askGemini(normalizedContent);
+            const aiMessage = messageRepo.savePrivateMessage(
+                GEMINI_BOT_ID,
+                session.user.id,
+                aiText || "Sorry, I could not generate a response right now.",
+            );
+
+            return withCors(
+                req,
+                new Response(
+                    JSON.stringify({
+                        userMessage,
+                        aiMessage,
+                    }),
+                    { headers: { "Content-Type": "application/json" } },
+                ),
+            );
         }
+
+        if (type === "room") {
+            const normalizedContent = content.trim();
+            if (!normalizedContent) {
+                return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
+            }
+
+            const userMessage = roomRepo.saveRoomMessage(session.user.id, targetId, normalizedContent);
+
+            const geminiMatch = normalizedContent.match(/^@gemini\s+(.+)$/i);
+
+            if (!geminiMatch) {
+                return withCors(req, new Response(JSON.stringify(userMessage), {
+                    headers: { "Content-Type": "application/json" },
+                }));
+            }
+
+            const prompt = geminiMatch[1]?.trim();
+            if (!prompt) {
+                return withCors(req, new Response(JSON.stringify(userMessage), {
+                    headers: { "Content-Type": "application/json" },
+                }));
+            }
+
+            const aiText = await askGemini(prompt);
+            const aiMessage = roomRepo.saveRoomMessage(
+                GEMINI_BOT_ID,
+                targetId,
+                aiText || "Sorry, I could not generate a response right now.",
+            );
+
+            return withCors(
+                req,
+                new Response(
+                    JSON.stringify({
+                        userMessage,
+                        aiMessage,
+                    }),
+                    { headers: { "Content-Type": "application/json" } },
+                ),
+            );
+        }
+
+        return withCors(req, new Response("Bad Request: Invalid message type", { status: 400 }));
+    } catch (error) {
+        console.error("Error processing message:", error);
+        return withCors(req, new Response("Internal Server Error", { status: 500 }));
+    }
+}
 
         const roomMessageMatch = url.pathname.match(/^\/api\/rooms\/([^\/]+)\/messages$/);
         if (roomMessageMatch && req.method === "GET") {
