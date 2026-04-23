@@ -364,8 +364,11 @@ if (url.pathname === "/api/messages" && req.method === "POST") {
             );
 
             const isGeminiTarget = targetId === GEMINI_BOT_ID;
+            const geminiMatch = normalizedContent.match(/^@gemini\s+(.+)$/i);
+            const promptFromTag = geminiMatch?.[1]?.trim();
+            const shouldTriggerGemini = isGeminiTarget || Boolean(promptFromTag);
 
-            if (!isGeminiTarget) {
+            if (!shouldTriggerGemini) {
                 return withCors(
                     req,
                     new Response(JSON.stringify(userMessage), {
@@ -374,7 +377,11 @@ if (url.pathname === "/api/messages" && req.method === "POST") {
                 );
             }
 
-            const aiText = await askGemini(normalizedContent);
+            const prompt = isGeminiTarget
+                ? normalizedContent.replace(/^@gemini\s+/i, "").trim() || normalizedContent
+                : (promptFromTag as string);
+
+            const aiText = await askGemini(prompt);
             const aiMessage = messageRepo.savePrivateMessage(
                 GEMINI_BOT_ID,
                 session.user.id,
@@ -392,7 +399,6 @@ if (url.pathname === "/api/messages" && req.method === "POST") {
                 ),
             );
         }
-
         if (type === "room") {
             const normalizedContent = content.trim();
             if (!normalizedContent) {
