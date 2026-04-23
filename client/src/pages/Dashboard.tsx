@@ -64,6 +64,18 @@ const normalizeSearchText = (value: string) =>
         .trim()
         .replace(/\s+/g, " ");
 
+const getAvatarToken = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return "?";
+
+    const parts = trimmed.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+        return parts[0].slice(0, 1).toUpperCase();
+    }
+
+    return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
+};
+
 const getStatusLabel = (msg: MessageItem) => {
     if (msg.status === "read") return "Read";
     if (msg.status === "delivered") return "Delivered";
@@ -136,6 +148,19 @@ const DashboardPage = () => {
     const [unreadRooms, setUnreadRooms] = useState<Record<string, number>>({});
     const [lastSeenRooms, setLastSeenRooms] = useState<Record<string, string>>({});
     const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | null>(null);
+
+    const getSenderDisplayName = (senderId: string) => {
+        if (senderId === "gemini-bot") {
+            return "Gemini";
+        }
+
+        if (senderId === currentUserId) {
+            return session?.user.name?.trim() || "You";
+        }
+
+        const found = data.users.find((u) => u.id === senderId);
+        return found?.name?.trim() || found?.email?.trim() || senderId.slice(0, 8);
+    };
 
 
 
@@ -696,12 +721,28 @@ const DashboardPage = () => {
                                     {messages.length > 0 ? (
                                         messages.map((msg: MessageItem) => {
                                             const isMe = msg.senderId === currentUserId;
+                                            const senderName = getSenderDisplayName(msg.senderId);
+                                            const avatarToken = getAvatarToken(senderName);
                                             return (
                                                 <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                                                     <div className={`max-w-[70%] border px-4 py-3 ${isMe
                                                         ? "border-[#6F62A3] bg-[#2A2248] text-[#F0ECFF]"
                                                         : "border-[#3A335D] bg-[#14102B] text-[#CDC6EA]"
                                                         }`}>
+                                                        <div className={`mb-2 flex items-center gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
+                                                            <button
+                                                                type="button"
+                                                                title="Profile view coming soon"
+                                                                aria-label={`Open ${senderName} profile`}
+                                                                className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#6F62A3] bg-[#1C1736] text-[10px] font-semibold text-[#EDE7FF]"
+                                                            >
+                                                                {avatarToken}
+                                                            </button>
+                                                            <span className="text-[10px] tracking-[0.08em] text-[#B9B1D9]">
+                                                                {senderName}
+                                                            </span>
+                                                        </div>
+
                                                         {msg.senderId === "gemini-bot" ? (
                                                             <div className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">
                                                                 <ReactMarkdown
