@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { getBearerToken, useSession } from "../api/auth";
+import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -116,6 +117,7 @@ const fetchSidebarData = async (
 
 const DashboardPage = () => {
     //State Management
+    const navigate = useNavigate();
     const { data: session, isPending } = useSession();
     const [activeChat, setActiveChat] = useState<ActiveUser>({ id: null, type: null });
     const [data, setData] = useState<DashboardData>({ users: [], rooms: [] });
@@ -148,6 +150,14 @@ const DashboardPage = () => {
     const [unreadRooms, setUnreadRooms] = useState<Record<string, number>>({});
     const [lastSeenRooms, setLastSeenRooms] = useState<Record<string, string>>({});
     const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | null>(null);
+
+    const openUserProfile = (userId: string) => {
+        const id = userId.trim();
+        if (!id) {
+            return;
+        }
+        navigate(`/profile/${encodeURIComponent(id)}`);
+    };
 
     const getSenderDisplayName = (senderId: string) => {
         if (senderId === "gemini-bot") {
@@ -188,7 +198,7 @@ const DashboardPage = () => {
             const localMatch = findInUsers(data.users);
 
             if (localMatch) {
-                setActiveChat({ id: localMatch.id, type: "direct" });
+                openUserProfile(localMatch.id);
                 setSearchQuery("");
                 return;
             }
@@ -204,7 +214,7 @@ const DashboardPage = () => {
 
                     const refreshedMatch = findInUsers(users);
                     if (refreshedMatch) {
-                        setActiveChat({ id: refreshedMatch.id, type: "direct" });
+                        openUserProfile(refreshedMatch.id);
                         setSearchQuery("");
                         return;
                     }
@@ -218,7 +228,7 @@ const DashboardPage = () => {
             });
             if (res.ok) {
                 const foundUser = await res.json();
-                setActiveChat({ id: foundUser.id, type: "direct" });
+                openUserProfile(foundUser.id);
                 setData(prev => ({
                     ...prev,
                     users: prev.users.some(u => u.id === foundUser.id) ? prev.users : [...prev.users, foundUser]
@@ -732,7 +742,8 @@ const DashboardPage = () => {
                                                         <div className={`mb-2 flex items-center gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
                                                             <button
                                                                 type="button"
-                                                                title="Profile view coming soon"
+                                                                onClick={() => openUserProfile(msg.senderId)}
+                                                                title="Open profile"
                                                                 aria-label={`Open ${senderName} profile`}
                                                                 className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#6F62A3] bg-[#1C1736] text-[10px] font-semibold text-[#EDE7FF]"
                                                             >
@@ -822,22 +833,20 @@ const DashboardPage = () => {
                         </div>
                     ) : (
                         <div className="relative flex h-full flex-col px-6 py-4 sm:px-8 sm:py-5">
-                            <div className="flex items-start justify-between">
+                            <form className="flex items-start justify-between" onSubmit={handleSearchID}>
                                 <div>
                                     <h1 className="text-5xl font-bold leading-none tracking-[0.02em] text-[#F6F2FF]">CHATRIX</h1>
                                     <p className="mt-1 text-[10px] tracking-[0.3em] text-[#958BB8] uppercase">STUDIO v1.0</p>
                                 </div>
-                                <form onSubmit={handleSearchID}>
-                                    <button
-                                        type="submit"
-                                        disabled={!searchQuery || isSearching}
-                                        className="inline-flex h-8 w-8 items-center justify-center border border-[#463D6A] bg-[#1A1434] text-[#D4CCEE] transition hover:bg-[#241C46] disabled:cursor-not-allowed disabled:opacity-50"
-                                        title="Search user by ID or name"
-                                    >
-                                        ⌕
-                                    </button>
-                                </form>
-                            </div>
+                                <button
+                                    type="submit"
+                                    disabled={!searchQuery || isSearching}
+                                    className="inline-flex h-8 w-8 items-center justify-center border border-[#463D6A] bg-[#1A1434] text-[#D4CCEE] transition hover:bg-[#241C46] disabled:cursor-not-allowed disabled:opacity-50"
+                                    title="Search user by ID or name"
+                                >
+                                    ⌕
+                                </button>
+                            </form>
 
                             <form className="mt-6 max-w-md" onSubmit={handleSearchID}>
                                 <input
