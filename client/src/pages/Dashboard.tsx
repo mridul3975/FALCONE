@@ -196,6 +196,23 @@ const DashboardPage = () => {
         return () => clearInterval(id);
     }, [session]);
 
+
+    type SendMessageResponse =
+        | ServerMessage
+        | {
+            userMessage: ServerMessage;
+            aiMessage?: ServerMessage;
+        };
+    const hasAiPayload = (
+        payload: SendMessageResponse,
+    ): payload is { userMessage: ServerMessage; aiMessage?: ServerMessage } => {
+        return (
+            typeof payload === "object" &&
+            payload !== null &&
+            "userMessage" in payload
+        );
+    };
+
     const handleSendMessage = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
@@ -238,8 +255,17 @@ const DashboardPage = () => {
                 throw new Error("Failed to send message");
             }
 
-            const savedMessage = await response.json();
-            setMessages((prev) => [...prev, mapServerMessage(savedMessage)]);
+            const payload = (await response.json()) as SendMessageResponse;
+
+            if (hasAiPayload(payload)) {
+                setMessages((prev) => {
+                    const next = [...prev, mapServerMessage(payload.userMessage)];
+                    if (payload.aiMessage) next.push(mapServerMessage(payload.aiMessage));
+                    return next;
+                });
+            } else {
+                setMessages((prev) => [...prev, mapServerMessage(payload)]);
+            }
             const sidebar = await fetchSidebarData(setData);
             if (sidebar) {
                 await refreshUnreadCounts(sidebar.users, sidebar.rooms);
@@ -518,8 +544,8 @@ const DashboardPage = () => {
                                             setSidebarMode(null);
                                         }}
                                         className={`flex w-full items-center justify-between rounded border px-2.5 py-2 text-left text-xs transition ${activeChat.id === u.id && activeChat.type === "direct"
-                                                ? "border-[#6C619A] bg-[#1F1A3D] text-[#F0ECFF]"
-                                                : "border-[#2B2450] bg-[#0F0C21] text-[#B8B0DA] hover:border-[#4A4273] hover:bg-[#15112B]"
+                                            ? "border-[#6C619A] bg-[#1F1A3D] text-[#F0ECFF]"
+                                            : "border-[#2B2450] bg-[#0F0C21] text-[#B8B0DA] hover:border-[#4A4273] hover:bg-[#15112B]"
                                             }`}
                                     >
                                         <div className="min-w-0 flex-1">
@@ -542,8 +568,8 @@ const DashboardPage = () => {
                                             setSidebarMode(null);
                                         }}
                                         className={`flex w-full items-center justify-between rounded border px-2.5 py-2 text-left text-xs transition ${activeChat.id === r.id && activeChat.type === "room"
-                                                ? "border-[#6C619A] bg-[#1F1A3D] text-[#F0ECFF]"
-                                                : "border-[#2B2450] bg-[#0F0C21] text-[#B8B0DA] hover:border-[#4A4273] hover:bg-[#15112B]"
+                                            ? "border-[#6C619A] bg-[#1F1A3D] text-[#F0ECFF]"
+                                            : "border-[#2B2450] bg-[#0F0C21] text-[#B8B0DA] hover:border-[#4A4273] hover:bg-[#15112B]"
                                             }`}
                                     >
                                         <div className="min-w-0 flex-1">

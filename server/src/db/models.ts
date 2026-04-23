@@ -96,38 +96,30 @@ export function initDb() {
     )
   `).run();
 
-  //ai conversations
-  function ensureAiTables() {
-    db.query(`
-    CREATE TABLE IF NOT EXISTS ai_requests (
-      id TEXT PRIMARY KEY,
-      userId TEXT NOT NULL UNIQUE,
-      requestCount INTEGER NOT NULL DEFAULT 0,
-      resetAt DATETIME NOT NULL,
-      updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
-    )
-  `).run();
+  ensureMessageColumns();
 
-    db.query(`
-    CREATE TABLE IF NOT EXISTS ai_conversations (
-      id TEXT PRIMARY KEY,
-      userId TEXT NOT NULL,
-      title TEXT,
-      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
-    )
-  `).run();
+  function ensureSystemUsers() {
+    const now = new Date().toISOString();
 
-    db.query(`CREATE INDEX IF NOT EXISTS idx_ai_requests_resetAt ON ai_requests(resetAt)`).run();
-    db.query(`CREATE INDEX IF NOT EXISTS idx_ai_conversations_user_created ON ai_conversations(userId, createdAt DESC)`).run();
+    db.query(
+      `
+    INSERT OR IGNORE INTO user
+      (id, name, email, emailVerified, image, createdAt, updatedAt)
+    VALUES
+      ($id, $name, $email, $emailVerified, $image, $createdAt, $updatedAt)
+  `
+    ).run({
+      $id: "gemini-bot",
+      $name: "Gemini",
+      $email: "gemini-bot@local.ai",
+      $emailVerified: 1,
+      $image: null,
+      $createdAt: now,
+      $updatedAt: now,
+    });
   }
 
-  ensureMessageColumns();
-  ensureAiTables();
-
-
+  ensureSystemUsers();
 
   console.log("🗄️  Database schema initialized (Auth + Chat Tables complete)");
 }

@@ -2,7 +2,6 @@ import { betterAuth } from "better-auth";
 import db from "../db/connection";
 import { bearer } from "better-auth/plugins/bearer";
 import { networkInterfaces } from "node:os";
-import { env } from "../config/env";
 
 
 
@@ -28,16 +27,17 @@ const defaultTrustedOrigins = defaultHosts.flatMap((host) =>
     DEV_CLIENT_PORTS.map((port) => `http://${host}:${port}`),
 );
 
-const envTrustedOrigins = env.TRUSTED_ORIGINS;
-
+const envTrustedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
 
 const trustedOrigins = Array.from(new Set([...defaultTrustedOrigins, ...envTrustedOrigins]));
 
 export const auth = betterAuth({
     database: db,
-    baseURL: env.AUTH_BASE_URL,
-
+    baseURL: process.env.AUTH_BASE_URL ?? "http://localhost:3000",
     emailAndPassword: {
         enabled: true,
     },

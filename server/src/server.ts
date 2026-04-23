@@ -6,14 +6,16 @@ import { roomRepo } from "./chat/rooms.repo";
 import { getRoomMessages } from "./chat/rooms.repo";
 import { networkInterfaces } from "node:os";
 import db from "./db/connection";
-import { env } from "./config/env";
+import { askGemini } from "../gemini.ts";
+
+
 
 
 // Initialize Database Schema
 initDb();
 
-const PORT = env.PORT;
-const HOST = env.HOST;
+const PORT = Number(process.env.PORT ?? 3000);
+const HOST = process.env.HOST ?? "0.0.0.0";
 
 const DEV_CLIENT_PORTS = [3000, 4173, 5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180];
 
@@ -32,13 +34,18 @@ function getLocalIPv4Hosts(): string[] {
     return hosts;
 }
 
+
+const GEMINI_BOT_ID = "gemini-bot";
+
 const defaultHosts = ["localhost", "127.0.0.1", ...getLocalIPv4Hosts()];
 const defaultAllowedOrigins = defaultHosts.flatMap((host) =>
     DEV_CLIENT_PORTS.map((port) => `http://${host}:${port}`),
 );
 
-const envAllowedOrigins = env.TRUSTED_ORIGINS;
-
+const envAllowedOrigins = (process.env.TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 const allowedOrigins = new Set([...defaultAllowedOrigins, ...envAllowedOrigins]);
 
 function buildCorsHeaders(req: Request): Headers {
@@ -345,9 +352,45 @@ LIMIT 50
 
             try {
                 if (type === "direct") {
-                    const saved = messageRepo.savePrivateMessage(session.user.id, targetId, content);
-                    const payload = saved
-                    return withCors(req, new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } }));
+                    const normalizedContent = content.trim();
+                    if (!normalizedContent) {
+                        return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
+                    }
+
+                    const userMessage = messageRepo.savePrivateMessage(
+                        session.user.id,
+                        targetId,
+                        normalizedContent,
+                    );
+
+                    const isGeminiTarget = targetId === GEMINI_BOT_ID;
+
+                    if (!isGeminiTarget) {
+                        return withCors(
+                            req,
+                            new Response(JSON.stringify(userMessage), {
+                                headers: { "Content-Type": "application/json" },
+                            }),
+                        );
+                    }
+
+                    const aiText = await askGemini(normalizedContent);
+                    const aiMessage = messageRepo.savePrivateMessage(
+                        GEMINI_BOT_ID,
+                        session.user.id,
+                        aiText || "Sorry, I could not generate a response right now.",
+                    );
+
+                    return withCors(
+                        req,
+                        new Response(
+                            JSON.stringify({
+                                userMessage,
+                                aiMessage,
+                            }),
+                            { headers: { "Content-Type": "application/json" } },
+                        ),
+                    );
                 } else if (type === "room") {
                     const saved = roomRepo.saveRoomMessage(session.user.id, targetId, content);
                     const payload = saved;
