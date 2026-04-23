@@ -842,17 +842,17 @@ const DashboardPage = () => {
             </div>
 
             {showCreateRoomModal && (
-                <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4">
-                    <div className="w-full max-w-md border border-[#2C3D5D] bg-[#0A111D] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.65)]">
-                        <h3 className="text-lg font-semibold tracking-[0.08em] text-[#D7E2F8]">Create New Room</h3>
-                        <p className="mt-1 text-xs tracking-[0.14em] text-[#7288AF] uppercase">Give your room a clear, short name.</p>
+                <div className="fixed inset-0 z-50 grid place-items-center bg-[#05040D]/80 p-4 backdrop-blur-sm">
+                    <div className="w-full max-w-md border border-[#2B2448] bg-[rgba(14,10,33,0.95)] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.68)]">
+                        <h3 className="text-lg font-semibold tracking-[0.08em] text-[#F1EDFF]">Create New Room</h3>
+                        <p className="mt-1 text-xs tracking-[0.14em] text-[#A79FC8] uppercase">Give your room a clear, short name.</p>
 
                         <form className="mt-4 space-y-3" onSubmit={handleCreateRoom}>
                             <input
                                 value={newRoomName}
                                 onChange={(e) => setNewRoomName(e.target.value)}
                                 placeholder="e.g. design-ops"
-                                className="w-full border border-[#253653] bg-[#0D1523] px-3 py-2 text-sm text-[#CFDCF6] outline-none placeholder:text-[#60769D] focus:border-[#4A638F]"
+                                className="w-full border border-[#3E3563] bg-[#120E29] px-3 py-2 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
                             />
 
                             {createRoomError && (
@@ -863,14 +863,14 @@ const DashboardPage = () => {
                                 <button
                                     type="button"
                                     onClick={() => setShowCreateRoomModal(false)}
-                                    className="border border-[#2F4160] px-3 py-2 text-sm text-[#A9BCDE] hover:bg-[#132035]"
+                                    className="border border-[#3A335A] px-3 py-2 text-sm text-[#B8B0DA] hover:bg-[#15112B]"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={isCreatingRoom}
-                                    className="border border-[#3F557C] bg-[#1F3354] px-3 py-2 text-sm font-bold text-[#D7E3FA] hover:bg-[#2A4471] disabled:opacity-70"
+                                    className="border border-[#554A80] bg-[#251E42] px-3 py-2 text-sm font-bold text-[#F4F0FF] hover:bg-[#32275A] disabled:opacity-70"
                                 >
                                     {isCreatingRoom ? "Creating..." : "Create Room"}
                                 </button>

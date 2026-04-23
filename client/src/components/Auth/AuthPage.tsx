@@ -33,31 +33,31 @@ export default function AuthPage({
     const loginMode = isLogin(mode);
 
     return (
-        <main className="relative min-h-screen overflow-hidden bg-[#05070B] text-[#E9EDF8]">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_45%_at_50%_0%,rgba(48,93,161,0.18)_0%,rgba(5,7,11,0)_65%)]" />
-            <div className="pointer-events-none absolute inset-0 opacity-60 [background:linear-gradient(120deg,rgba(255,255,255,0.03)_0%,rgba(255,255,255,0)_30%,rgba(255,255,255,0.03)_60%,rgba(255,255,255,0)_100%)]" />
+        <main className="relative min-h-screen overflow-hidden bg-[#03030A] text-[#D3D9EB]">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_70%_10%,rgba(86,48,163,0.22)_0%,rgba(5,4,20,0.95)_55%,rgba(3,3,10,1)_100%)]" />
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(118,98,170,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(118,98,170,0.06)_1px,transparent_1px)] bg-size-[220px_220px]" />
 
             <section className="relative mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-8 sm:px-8">
                 <header className="mb-8 flex items-center justify-center gap-3">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#244A84] bg-[#0A1221] text-[13px] font-semibold text-[#6EA6FF]">
-                        M
+                    <span className="inline-flex h-9 w-9 items-center justify-center border border-[#3A3458] bg-[#0C0A1C] text-[13px] font-semibold text-[#C3BDE0]">
+                        ☁
                     </span>
-                    <span className="font-serif text-[34px] font-semibold italic tracking-[0.16em] text-[#FFF8E6]">
+                    <span className="text-[32px] font-black tracking-[0.12em] text-[#F6F2FF]">
                         CHATRIX
                     </span>
                 </header>
 
-                <div className="rounded-[32px] border border-[#1A2230] bg-[rgba(6,10,17,0.88)] p-7 shadow-[0_24px_80px_rgba(0,0,0,0.6)] backdrop-blur-xl sm:p-9">
-                    <div className="mx-auto mb-8 flex h-28 w-28 items-center justify-center rounded-2xl border border-[#1E2A3D] bg-gradient-to-br from-[#111A2A] to-[#0A0F17]">
-                        <div className="grid h-12 w-12 place-items-center rounded-xl border border-[#30425F] bg-[#0F1724] text-[#A8B9D6]">
-                            <span className="text-2xl">⬢</span>
+                <div className="border border-[#2B2448] bg-[rgba(14,10,33,0.92)] p-7 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl sm:p-9">
+                    <div className="mx-auto mb-8 flex h-28 w-28 items-center justify-center border border-[#3A335D] bg-[#14102B]">
+                        <div className="grid h-12 w-12 place-items-center border border-[#6F62A3] bg-[#2A2248] text-[#F0ECFF]">
+                            <span className="text-xl">◉</span>
                         </div>
                     </div>
 
-                    <h1 className="mb-2 text-center font-serif text-5xl italic text-[#FFF2D9]">
+                    <h1 className="mb-2 text-center text-5xl font-semibold tracking-[0.02em] text-[#F1EDFF]">
                         {loginMode ? "Welcome Back" : "Create Account"}
                     </h1>
-                    <p className="mb-8 text-center text-xs tracking-[0.2em] text-[#9CA7BC] uppercase">
+                    <p className="mb-8 text-center text-xs tracking-[0.2em] text-[#A79FC8] uppercase">
                         {loginMode
                             ? "Secure Communication For The Modern Age"
                             : "Begin Your Secure Communication Journey"}
@@ -74,7 +74,7 @@ export default function AuthPage({
                                     autoComplete="name"
                                     value={name ?? ""}
                                     onChange={(event) => onNameChange?.(event.target.value)}
-                                    className="w-full rounded-xl border border-[#232F43] bg-[#0B111A] px-4 py-3.5 text-[#E9EDF8] outline-none transition focus:border-[#4C6EA8]"
+                                    className="w-full border border-[#3E3563] bg-[#120E29] px-4 py-3.5 text-[#E9E4FA] outline-none transition focus:border-[#6E62A3]"
                                     placeholder="Your Name"
                                 />
                             </label>
@@ -90,7 +90,7 @@ export default function AuthPage({
                                 autoComplete="email"
                                 value={email}
                                 onChange={(event) => onEmailChange(event.target.value)}
-                                className="w-full rounded-xl border border-[#232F43] bg-[#0B111A] px-4 py-3.5 text-[#E9EDF8] outline-none transition focus:border-[#4C6EA8]"
+                                className="w-full border border-[#3E3563] bg-[#120E29] px-4 py-3.5 text-[#E9E4FA] outline-none transition focus:border-[#6E62A3]"
                                 placeholder="name@monolith.com"
                             />
                         </label>
@@ -114,7 +114,7 @@ export default function AuthPage({
                                 minLength={8}
                                 value={password}
                                 onChange={(event) => onPasswordChange(event.target.value)}
-                                className="w-full rounded-xl border border-[#232F43] bg-[#0B111A] px-4 py-3.5 text-[#E9EDF8] outline-none transition focus:border-[#4C6EA8]"
+                                className="w-full border border-[#3E3563] bg-[#120E29] px-4 py-3.5 text-[#E9E4FA] outline-none transition focus:border-[#6E62A3]"
                                 placeholder="••••••••"
                             />
                         </label>
@@ -128,7 +128,7 @@ export default function AuthPage({
                         <button
                             disabled={isSubmitting}
                             type="submit"
-                            className="mt-3 w-full rounded-xl bg-[#D8D9DD] px-4 py-3.5 text-sm font-bold tracking-[0.1em] text-[#0A1D34] uppercase transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-70"
+                            className="mt-3 w-full border border-[#554A80] bg-[#251E42] px-4 py-3.5 text-sm font-bold tracking-widest text-[#F4F0FF] uppercase transition hover:bg-[#32275A] disabled:cursor-not-allowed disabled:opacity-70"
                         >
                             {isSubmitting
                                 ? "Please Wait..."
@@ -138,22 +138,22 @@ export default function AuthPage({
                         </button>
                     </form>
 
-                    <div className="my-8 flex items-center gap-3 text-[11px] tracking-[0.16em] text-[#77839C] uppercase">
-                        <div className="h-px flex-1 bg-[#283142]" />
+                    <div className="my-8 flex items-center gap-3 text-[11px] tracking-[0.16em] text-[#7C739F] uppercase">
+                        <div className="h-px flex-1 bg-[#2B2448]" />
                         <span>Verification Gateways</span>
-                        <div className="h-px flex-1 bg-[#283142]" />
+                        <div className="h-px flex-1 bg-[#2B2448]" />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                         <button
                             type="button"
-                            className="rounded-xl border border-[#222E42] bg-[#0B111A] px-4 py-3 text-sm font-semibold tracking-[0.08em] text-[#E4EAF7] uppercase"
+                            className="border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm font-semibold tracking-[0.08em] text-[#E4EAF7] uppercase"
                         >
                             Google
                         </button>
                         <button
                             type="button"
-                            className="rounded-xl border border-[#222E42] bg-[#0B111A] px-4 py-3 text-sm font-semibold tracking-[0.08em] text-[#E4EAF7] uppercase"
+                            className="border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm font-semibold tracking-[0.08em] text-[#E4EAF7] uppercase"
                         >
                             Apple
                         </button>
@@ -163,7 +163,7 @@ export default function AuthPage({
                         {loginMode ? "Don’t have an account? " : "Already have an account? "}
                         <Link
                             to={loginMode ? "/signup" : "/login"}
-                            className="font-semibold text-[#F8FBFF] hover:text-[#A3C4FF]"
+                            className="font-semibold text-[#F8FBFF] hover:text-[#C3BDE0]"
                         >
                             {loginMode ? "Sign Up" : "Sign In"}
                         </Link>
