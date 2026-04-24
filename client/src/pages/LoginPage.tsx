@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AuthPage from "../components/Auth/AuthPage.tsx";
-import * as auth from "../api/auth";
+import * as auth from "../api/auth.ts";
 
 export default function LoginPage() {
     const navigate = useNavigate();

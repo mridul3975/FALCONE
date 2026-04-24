@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getBearerToken } from "../api/auth";
+import { getBearerToken } from "../api/auth.ts";
 
 type UserProfile = {
     id: string;
@@ -15,11 +15,12 @@ const getAvatarToken = (name: string) => {
     if (!trimmed) return "?";
 
     const parts = trimmed.split(/\s+/).filter(Boolean);
+    const [firstPart = "", secondPart = ""] = parts;
     if (parts.length === 1) {
-        return parts[0].slice(0, 1).toUpperCase();
+        return firstPart.slice(0, 1).toUpperCase();
     }
 
-    return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
+    return `${firstPart.slice(0, 1)}${secondPart.slice(0, 1)}`.toUpperCase();
 };
 
 export default function ProfilePage() {

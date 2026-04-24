@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { getBearerToken, useSession } from "../api/auth";
+import { getBearerToken, useSession } from "../api/auth.ts";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -70,11 +70,12 @@ const getAvatarToken = (name: string) => {
     if (!trimmed) return "?";
 
     const parts = trimmed.split(/\s+/).filter(Boolean);
+    const [firstPart = "", secondPart = ""] = parts;
     if (parts.length === 1) {
-        return parts[0].slice(0, 1).toUpperCase();
+        return firstPart.slice(0, 1).toUpperCase();
     }
 
-    return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
+    return `${firstPart.slice(0, 1)}${secondPart.slice(0, 1)}`.toUpperCase();
 };
 
 const getStatusLabel = (msg: MessageItem) => {
@@ -227,7 +228,7 @@ const DashboardPage = () => {
                 },
             });
             if (res.ok) {
-                const foundUser = await res.json();
+                const foundUser = (await res.json()) as UserItem;
                 openUserProfile(foundUser.id);
                 setData(prev => ({
                     ...prev,
@@ -235,7 +236,7 @@ const DashboardPage = () => {
                 }));
                 setSearchQuery("");
             } else {
-                alert("User not found.");
+                (globalThis as { alert?: (message: string) => void }).alert?.("User not found.");
             }
         } catch (err) {
             console.error("Search failed", err);
@@ -422,7 +423,7 @@ const DashboardPage = () => {
                     setUnreadDirect((prev) => ({ ...prev, [activeChat.id as string]: 0 }));
                 } else {
                     const roomHistory = chatHistory as RoomHistoryMessage[];
-                    const latest = roomHistory.length > 0 ? roomHistory[roomHistory.length - 1].timestamp : null;
+                    const latest = roomHistory.length > 0 ? roomHistory[roomHistory.length - 1]?.timestamp ?? null : null;
                     if (latest) {
                         setLastSeenRooms((prev) => ({ ...prev, [activeChat.id as string]: latest }));
                     }
@@ -438,7 +439,8 @@ const DashboardPage = () => {
 
     useEffect(() => {
         if (scrollRef.current) {
-            scrollRef.current.scrollIntoView({ behavior: "smooth" });
+            (scrollRef.current as unknown as { scrollIntoView?: (options?: { behavior?: string }) => void })
+                .scrollIntoView?.({ behavior: "smooth" });
         }
     }, [messages]);
 
@@ -671,9 +673,9 @@ const DashboardPage = () => {
                                             <p className="truncate font-medium">{u.name || u.email || "Unknown"}</p>
                                             <p className="text-[9px] tracking-[0.08em] text-[#8178A0]">USER</p>
                                         </div>
-                                        {(unreadDirect[u.id] ?? 0) > 0 && (
+                                        {((unreadDirect[u.id] ?? 0) > 0) && (
                                             <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-[#D95A6F] px-1.5 py-0.5 text-[9px] font-bold text-white">
-                                                {unreadDirect[u.id] > 99 ? "99+" : unreadDirect[u.id]}
+                                                {(unreadDirect[u.id] ?? 0) > 99 ? "99+" : (unreadDirect[u.id] ?? 0)}
                                             </span>
                                         )}
                                     </button>
@@ -695,9 +697,9 @@ const DashboardPage = () => {
                                             <p className="truncate font-medium"># {r.name}</p>
                                             <p className="text-[9px] tracking-[0.08em] text-[#8178A0]">ROOM</p>
                                         </div>
-                                        {(unreadRooms[r.id] ?? 0) > 0 && (
+                                        {((unreadRooms[r.id] ?? 0) > 0) && (
                                             <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-[#D95A6F] px-1.5 py-0.5 text-[9px] font-bold text-white">
-                                                {unreadRooms[r.id] > 99 ? "99+" : unreadRooms[r.id]}
+                                                {(unreadRooms[r.id] ?? 0) > 99 ? "99+" : (unreadRooms[r.id] ?? 0)}
                                             </span>
                                         )}
                                     </button>
@@ -816,7 +818,10 @@ const DashboardPage = () => {
                                         <input
                                             name="msg"
                                             value={messageDraft}
-                                            onChange={(event) => setMessageDraft(event.target.value)}
+                                            onChange={(event) => {
+                                                const target = event.currentTarget as unknown as { value: string };
+                                                setMessageDraft(target.value);
+                                            }}
                                             className="flex-1 border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
                                             placeholder="Transmit message..."
                                         />
@@ -851,7 +856,10 @@ const DashboardPage = () => {
                             <form className="mt-6 max-w-md" onSubmit={handleSearchID}>
                                 <input
                                     value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    onChange={(e) => {
+                                        const target = e.currentTarget as unknown as { value: string };
+                                        setSearchQuery(target.value);
+                                    }}
                                     placeholder="Paste user ID or name"
                                     className="w-full border border-[#403760] bg-[#120E2A] px-3 py-2 text-[11px] tracking-[0.08em] text-[#D6D0EF] outline-none placeholder:text-[#7D73A0] focus:border-[#6C619A]"
                                 />
@@ -900,7 +908,10 @@ const DashboardPage = () => {
                         <form className="mt-4 space-y-3" onSubmit={handleCreateRoom}>
                             <input
                                 value={newRoomName}
-                                onChange={(e) => setNewRoomName(e.target.value)}
+                                onChange={(e) => {
+                                    const target = e.currentTarget as unknown as { value: string };
+                                    setNewRoomName(target.value);
+                                }}
                                 placeholder="e.g. design-ops"
                                 className="w-full border border-[#3E3563] bg-[#120E29] px-3 py-2 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
                             />

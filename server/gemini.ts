@@ -1,5 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 
+declare const Bun: {
+  argv: string[];
+  main?: boolean;
+};
+
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function askGemini(prompt: string, recentMessages: string[] = []) {
