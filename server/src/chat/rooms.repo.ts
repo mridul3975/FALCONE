@@ -2,15 +2,18 @@ import db from "../db/connection";
 
 export const roomRepo = {
     // 1. Create a new room
-    createRoom: (name: string) => {
+    createRoom: (name: string, creatorId: string) => {
         const id = crypto.randomUUID();
         try {
-            db.query(`INSERT INTO rooms (id, name) VALUES ($id, $name)`).run({
+            db.query(`INSERT INTO rooms (id, name, creatorId) VALUES ($id, $name, $creatorId)`).run({
                 $id: id,
-                $name: name
+                $name: name,
+                $creatorId: creatorId
             });
-            console.log(`🏠 Created new room: ${name}`);
-            return { id, name };
+            // Automatically join the creator
+            db.query(`INSERT INTO room_members (roomId, userId) VALUES (?, ?)`).run(id, creatorId);
+            console.log(`🏠 Created new room: ${name} by ${creatorId}`);
+            return { id, name, creatorId };
         } catch (error) {
             console.error("❌ Error creating room:", error);
             throw error;
@@ -19,7 +22,7 @@ export const roomRepo = {
 
     // 2. Get a list of all rooms
     getAllRooms: () => {
-        return db.query(`SELECT * FROM rooms ORDER BY createdAt DESC`).all();
+        return db.query(`SELECT id, name, creatorId, createdAt FROM rooms ORDER BY createdAt DESC`).all();
     },
 
     // 3. Save a message sent to a room

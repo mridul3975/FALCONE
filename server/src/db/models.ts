@@ -66,7 +66,21 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS rooms (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      creatorId TEXT,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (creatorId) REFERENCES user(id) ON DELETE SET NULL
+    )
+  `).run();
+
+  db.query(`
+    CREATE TABLE IF NOT EXISTS room_join_requests (
+      id TEXT PRIMARY KEY,
+      roomId TEXT NOT NULL,
+      userId TEXT NOT NULL,
+      status TEXT DEFAULT 'pending', -- pending, accepted, rejected
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE,
+      FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
     )
   `).run();
 
@@ -121,8 +135,8 @@ export function initDb() {
 
   ensureSystemUsers();
   ensureUserColumns();
+  ensureRoomColumns();
   ensureMessageColumns();
-  ensureRoomMessageColumns();
   initReactionsTable();
   console.log("🗄️  Database schema initialized (Auth + Chat Tables complete)");
 }
@@ -136,6 +150,18 @@ function ensureUserColumns() {
 
   if (!existing.has("lastSeen")) {
     db.query(`ALTER TABLE user ADD COLUMN lastSeen DATETIME`).run();
+  }
+}
+
+function ensureRoomColumns() {
+  const columns = db
+    .query(`PRAGMA table_info(rooms)`)
+    .all() as Array<{ name: string }>;
+
+  const existing = new Set(columns.map((c) => c.name));
+
+  if (!existing.has("creatorId")) {
+    db.query(`ALTER TABLE rooms ADD COLUMN creatorId TEXT REFERENCES user(id)`).run();
   }
 }
 
@@ -164,20 +190,7 @@ function ensureMessageColumns() {
   db.query(`CREATE INDEX IF NOT EXISTS idx_messages_receiver_sender_readAt ON messages(receiverId, senderId, readAt)`).run();
 }
 
-function ensureRoomMessageColumns() {
-  const columns = db
-    .query(`PRAGMA table_info(room_messages)`)
-    .all() as Array<{ name: string }>;
 
-  const existing = new Set(columns.map((c) => c.name));
-
-  const alters: string[] = [];
-  if (!existing.has("replyToId")) alters.push(`ALTER TABLE room_messages ADD COLUMN replyToId TEXT`);
-
-  for (const sql of alters) {
-    db.query(sql).run();
-  }
-}
 
 function initReactionsTable() {
   db.run(`

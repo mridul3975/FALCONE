@@ -488,6 +488,25 @@ LIMIT 50
             if (!session) {
                 return withCors(req, new Response("Unauthorized", { status: 401 }));
             }
+            const rooms = db.query(`
+                SELECT r.id, r.name, r.creatorId, r.createdAt 
+                FROM rooms r
+                JOIN room_members rm ON r.id = rm.roomId
+                WHERE rm.userId = ?
+                ORDER BY r.createdAt DESC
+            `).all(session.user.id);
+            return withCors(req, new Response(JSON.stringify(rooms), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+
+        if (url.pathname === "/api/rooms/all" && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
             const rooms = roomRepo.getAllRooms();
             return withCors(req, new Response(JSON.stringify(rooms), {
                 headers: { "Content-Type": "application/json" },
@@ -507,7 +526,7 @@ LIMIT 50
                 return withCors(req, new Response("Bad Request: Missing room name", { status: 400 }));
             }
 
-            const newRoom = roomRepo.createRoom(body.name.trim());
+            const newRoom = roomRepo.createRoom(body.name.trim(), session.user.id);
             return withCors(req, new Response(JSON.stringify(newRoom), {
                 headers: { "Content-Type": "application/json" },
             }));
@@ -621,6 +640,12 @@ LIMIT 50
                         return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
                     }
 
+                    // Check membership
+                    const isMember = db.query("SELECT 1 FROM room_members WHERE roomId = ? AND userId = ?").get(targetId, session.user.id);
+                    if (!isMember) {
+                        return withCors(req, new Response("Forbidden: Not a room member", { status: 403 }));
+                    }
+
                     const userMessage = roomRepo.saveRoomMessage(session.user.id, targetId, normalizedContent, { replyToId });
 
                     const geminiMatch = normalizedContent.match(/^@gemini\s+(.+)$/i);
@@ -678,6 +703,12 @@ LIMIT 50
                 return withCors(req, new Response("Bad Request: Missing room ID", { status: 400 }));
             }
             try {
+                // Check membership
+                const isMember = db.query("SELECT 1 FROM room_members WHERE roomId = ? AND userId = ?").get(roomId, session.user.id);
+                if (!isMember) {
+                    return withCors(req, new Response("Forbidden: Not a room member", { status: 403 }));
+                }
+
                 const messages = getRoomMessages(roomId);
                 return withCors(req, new Response(JSON.stringify(messages), {
                     headers: { "Content-Type": "application/json" },
@@ -1350,6 +1381,76 @@ if (!allowsRequests) {
             }), {
                 headers: { "Content-Type": "application/json" }
             }));
+        }
+
+        // --- ROOM JOIN REQUESTS ---
+        if (url.pathname.match(/\/api\/rooms\/[^\/]+\/request-join/) && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const roomId = url.pathname.split("/")[3];
+            const existing = db.query("SELECT id FROM room_join_requests WHERE roomId = ? AND userId = ? AND status = 'pending'").get(roomId, session.user.id);
+            if (existing) return withCors(req, new Response("Request already pending", { status: 409 }));
+
+            const requestId = crypto.randomUUID();
+            db.run("INSERT INTO room_join_requests (id, roomId, userId) VALUES (?, ?, ?)", [requestId, roomId, session.user.id]);
+            
+            // Notify creator
+            const room = db.query("SELECT creatorId FROM rooms WHERE id = ?").get(roomId) as { creatorId: string };
+            if (room?.creatorId) {
+                server.publish(room.creatorId, JSON.stringify({
+                    type: "room_join_request",
+                    data: { requestId, roomId, userId: session.user.id }
+                }));
+            }
+
+            return withCors(req, new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }));
+        }
+
+        if (url.pathname.match(/\/api\/rooms\/[^\/]+\/join-requests/) && req.method === "GET") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const roomId = url.pathname.split("/")[3];
+            const room = db.query("SELECT creatorId FROM rooms WHERE id = ?").get(roomId) as { creatorId: string };
+            if (room?.creatorId !== session.user.id) return withCors(req, new Response("Forbidden", { status: 403 }));
+
+            const requests = db.query(`
+                SELECT r.*, u.name as user_name 
+                FROM room_join_requests r
+                JOIN user u ON r.userId = u.id
+                WHERE r.roomId = ? AND r.status = 'pending'
+            `).all(roomId);
+
+            return withCors(req, new Response(JSON.stringify(requests), { headers: { "Content-Type": "application/json" } }));
+        }
+
+        if (url.pathname.match(/\/api\/rooms\/join-requests\/[^\/]+\/respond/) && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const requestId = url.pathname.split("/")[4];
+            const body = await req.json() as { action: 'accept' | 'reject' };
+            
+            const request = db.query("SELECT * FROM room_join_requests WHERE id = ?").get(requestId) as any;
+            if (!request) return withCors(req, new Response("Not Found", { status: 404 }));
+
+            const room = db.query("SELECT creatorId FROM rooms WHERE id = ?").get(request.roomId) as { creatorId: string };
+            if (room?.creatorId !== session.user.id) return withCors(req, new Response("Forbidden", { status: 403 }));
+
+            if (body.action === 'accept') {
+                db.run("UPDATE room_join_requests SET status = 'accepted' WHERE id = ?", [requestId]);
+                db.run("INSERT OR IGNORE INTO room_members (roomId, userId) VALUES (?, ?)", [request.roomId, request.userId]);
+            } else {
+                db.run("UPDATE room_join_requests SET status = 'rejected' WHERE id = ?", [requestId]);
+            }
+
+            server.publish(request.userId, JSON.stringify({
+                type: "room_join_response",
+                data: { roomId: request.roomId, status: body.action === 'accept' ? 'accepted' : 'rejected' }
+            }));
+
+            return withCors(req, new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }));
         }
 
         if (url.pathname.startsWith("/api/")) {

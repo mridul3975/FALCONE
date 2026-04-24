@@ -21,8 +21,17 @@ interface UserItem {
 interface RoomItem {
     id: string;
     name: string;
+    creatorId: string;
     createdAt: string;
 }
+
+type RoomJoinRequest = {
+    id: string;
+    roomId: string;
+    userId: string;
+    user_name?: string;
+    status: "pending" | "accepted" | "rejected";
+};
 
 interface MessageItem {
     id: string;
@@ -293,7 +302,8 @@ const DashboardPage = () => {
     const [unreadDirect, setUnreadDirect] = useState<Record<string, number>>({});
     const [unreadRooms, setUnreadRooms] = useState<Record<string, number>>({});
     const [lastSeenRooms, setLastSeenRooms] = useState<Record<string, string>>({});
-    const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | "requests" | "message_search" | null>(null);
+    const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | "requests" | "message_search" | "room_discover" | null>(null);
+    const [allRooms, setAllRooms] = useState<RoomItem[]>([]);
     const [friendRequestsIncoming, setFriendRequestsIncoming] = useState<FriendRequestItem[]>([]);
     const [friendRequestsOutgoing, setFriendRequestsOutgoing] = useState<FriendRequestItem[]>([]);
     const [messageRequestsIncoming, setMessageRequestsIncoming] = useState<MessageRequestItem[]>([]);
@@ -303,6 +313,46 @@ const DashboardPage = () => {
     const [requestActionLoading, setRequestActionLoading] = useState<string | null>(null);
     const [relationshipStatus, setRelationshipStatus] = useState<RelationshipStatus>("ACCEPTED");
     const [chatRestricted, setChatRestricted] = useState(false);
+    const [roomJoinRequests, setRoomJoinRequests] = useState<RoomJoinRequest[]>([]);
+
+    const handleRequestJoinRoom = async (roomId: string) => {
+        const bearerToken = getBearerToken();
+        if (!bearerToken) return;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/rooms/${roomId}/request-join`, {
+                method: "POST",
+                headers: authHeaders(bearerToken),
+            });
+            if (res.ok) {
+                setRequestActionInfo("Join request sent to room creator.");
+            } else {
+                setRequestActionError("Failed to send join request.");
+            }
+        } catch (err) {
+            console.error("Join request failed", err);
+        }
+    };
+
+    const handleRespondJoinRoom = async (requestId: string, action: 'accept' | 'reject') => {
+        const bearerToken = getBearerToken();
+        if (!bearerToken) return;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/rooms/join-requests/${requestId}/respond`, {
+                method: "POST",
+                headers: authHeaders(bearerToken),
+                body: JSON.stringify({ action }),
+            });
+            if (res.ok) {
+                setRoomJoinRequests(prev => prev.filter(r => r.id !== requestId));
+                // If accepted, maybe refresh room list or membership
+                fetchSidebarData(setData);
+            }
+        } catch (err) {
+            console.error("Respond join request failed", err);
+        }
+    };
 
     const openUserProfile = (userId: string) => {
         const id = userId.trim();
@@ -807,6 +857,10 @@ const DashboardPage = () => {
                 );
 
                 if (!response.ok) {
+                    if (response.status === 403) {
+                        const txt = await response.text();
+                        throw new Error(txt);
+                    }
                     throw new Error("Failed to fetch messages");
                 }
 
@@ -868,7 +922,8 @@ const DashboardPage = () => {
                     }
                     setUnreadRooms((prev) => ({ ...prev, [activeChat.id as string]: 0 }));
                 }
-            } catch {
+            } catch (err: any) {
+                setError(err.message);
                 setRelationshipStatus("NONE");
                 setChatRestricted(false);
                 setMessages([]);
@@ -913,7 +968,7 @@ const DashboardPage = () => {
         const directCounts = await Promise.all(
             usersList.map(async (u) => {
                 try {
-                    const res = await fetch(`http://localhost:3000/api/messages/${u.id}`, {
+                    const res = await fetch(`${API_BASE}/api/messages/${u.id}`, {
                         headers: { Authorization: `Bearer ${bearerToken}` },
                     });
                     if (!res.ok) return [u.id, 0] as const;
@@ -938,7 +993,7 @@ const DashboardPage = () => {
         const roomCounts = await Promise.all(
             roomsList.map(async (r) => {
                 try {
-                    const res = await fetch(`http://localhost:3000/api/rooms/${r.id}/messages`, {
+                    const res = await fetch(`${API_BASE}/api/rooms/${r.id}/messages`, {
                         headers: { Authorization: `Bearer ${bearerToken}` },
                     });
                     if (!res.ok) return [r.id, 0] as const;
@@ -1119,10 +1174,66 @@ const DashboardPage = () => {
                 >
                     <div className="flex h-full flex-col p-4">
                         <h3 className="mb-4 text-[11px] font-semibold tracking-[0.2em] text-[#D9D2F1] uppercase">
-                            {sidebarMode === "direct" ? "Direct Contacts" : sidebarMode === "room" ? "Rooms" : sidebarMode === "message_search" ? "Search Messages" : "Requests & Friends"}
+                            {sidebarMode === "direct" ? "Direct Contacts" : sidebarMode === "room" ? "My Rooms" : sidebarMode === "room_discover" ? "Discover Rooms" : sidebarMode === "message_search" ? "Search Messages" : "Requests & Friends"}
                         </h3>
-
                         <div className="flex-1 space-y-1.5 overflow-y-auto">
+                            {sidebarMode === "room" && (
+                                <button
+                                    onClick={async () => {
+                                        setSidebarMode("room_discover");
+                                        const res = await fetch(`${API_BASE}/api/rooms/all`, {
+                                            headers: { Authorization: `Bearer ${getBearerToken()}` }
+                                        });
+                                        if (res.ok) setAllRooms(await res.json());
+                                    }}
+                                    className="mb-4 w-full rounded border border-dashed border-[#4A4273] py-2 text-[10px] font-bold tracking-widest text-[#A298C3] uppercase transition hover:border-[#6C619A] hover:text-[#D9D2F1]"
+                                >
+                                    + Discover More Rooms
+                                </button>
+                            )}
+
+                            {sidebarMode === "room_discover" && (
+                                <div className="mb-4">
+                                    <button 
+                                        onClick={() => setSidebarMode("room")}
+                                        className="mb-3 block text-[9px] font-bold text-[#6E62A3] uppercase tracking-widest hover:text-[#D9D2F1]"
+                                    >
+                                        ← Back to My Rooms
+                                    </button>
+                                    <div className="space-y-1.5">
+                                        {allRooms
+                                            .filter(r => !data.rooms.some(myR => myR.id === r.id))
+                                            .filter(r => r.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                                            .map(r => (
+                                                <div key={r.id} className="flex items-center justify-between rounded border border-[#2B2450] bg-[#0F0C21] p-2.5">
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="truncate text-xs font-medium text-[#D9D2F1]"># {r.name}</p>
+                                                        <p className="text-[8px] text-[#6E62A3] uppercase">Private Room</p>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleRequestJoinRoom(r.id)}
+                                                        className="ml-2 rounded bg-[#2A2248] px-2 py-1 text-[9px] font-bold text-[#F1EDFF] transition hover:bg-[#3A335D]"
+                                                    >
+                                                        JOIN
+                                                    </button>
+                                                </div>
+                                            ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {(sidebarMode === "room" || sidebarMode === "room_discover") && (
+                                <div className="mb-4 relative">
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        placeholder="Filter rooms..."
+                                        className="w-full border border-[#2B2450] bg-[#0F0C21] px-2.5 py-2 text-xs text-[#D9D2F1] outline-none focus:border-[#6C619A]"
+                                    />
+                                </div>
+                            )}
+
                             {sidebarMode === "message_search" && (
                                 <div className="mb-4 space-y-3">
                                     <form onSubmit={handleMessageSearch} className="relative">
@@ -1516,7 +1627,65 @@ const DashboardPage = () => {
                                     </button>
                                 </div>
                             </div>
-                            {activeChat.type === "direct" && chatRestricted && activeChat.id && (
+                        {activeChat.id && activeChat.type === "room" && (
+                            (() => {
+                                const room = data.rooms.find(r => r.id === activeChat.id);
+                                const isCreator = room?.creatorId === currentUserId;
+                                // We'd need to know if we are a member. 
+                                // Let's check messages array or a specific membership state.
+                                // Simplest for now: if we failed to load messages, we are restricted.
+                                if (error === "Forbidden: Not a room member") {
+                                    return (
+                                        <div className="border-b border-[#3A335D]/50 bg-[#14102B]/60 px-8 py-4 backdrop-blur-md">
+                                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2A2248] text-[#9C93BE]">🔒</div>
+                                                    <div>
+                                                        <p className="text-xs font-semibold tracking-wide text-[#F1EDFF]">Private Room</p>
+                                                        <p className="text-[10px] text-[#8D83B2]">You must be a member to view this room.</p>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleRequestJoinRoom(activeChat.id!)}
+                                                    className="rounded border border-[#6E62A3] bg-[#2A2248] px-4 py-2 text-[10px] font-bold tracking-[0.12em] text-[#F1EDFF] uppercase transition hover:border-[#F1EDFF]"
+                                                >
+                                                    Request to Join
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+                                if (isCreator) {
+                                    // Optionally show button to view requests
+                                    return (
+                                        <div className="border-b border-[#3A335D]/50 bg-[#14102B]/30 px-8 py-2">
+                                            <button 
+                                                onClick={async () => {
+                                                    const res = await fetch(`${API_BASE}/api/rooms/${activeChat.id}/join-requests`, {
+                                                        headers: { Authorization: `Bearer ${getBearerToken()}` }
+                                                    });
+                                                    if (res.ok) setRoomJoinRequests(await res.json());
+                                                }}
+                                                className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest hover:text-emerald-300"
+                                            >
+                                                Manage Join Requests ({roomJoinRequests.filter(r => r.roomId === activeChat.id).length})
+                                            </button>
+                                            {roomJoinRequests.filter(r => r.roomId === activeChat.id).map(req => (
+                                                <div key={req.id} className="mt-2 flex items-center justify-between bg-black/20 p-2 rounded">
+                                                    <span className="text-[10px] text-[#D6D0EF]">{req.user_name} wants to join</span>
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => handleRespondJoinRoom(req.id, 'accept')} className="text-[9px] text-emerald-400 font-bold">ACCEPT</button>
+                                                        <button onClick={() => handleRespondJoinRoom(req.id, 'reject')} className="text-[9px] text-rose-400 font-bold">REJECT</button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                }
+                                return null;
+                            })()
+                        )}
+                        {activeChat.type === "direct" && chatRestricted && activeChat.id && (
                                 <div className="border-b border-[#3A335D]/50 bg-[#14102B]/60 px-8 py-4 backdrop-blur-md">
                                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                                         <div className="flex items-center gap-3">
