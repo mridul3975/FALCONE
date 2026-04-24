@@ -147,3 +147,65 @@ function ensureMessageColumns() {
   db.query(`CREATE INDEX IF NOT EXISTS idx_messages_receiver_sender_status ON messages(receiverId, senderId, status)`).run();
   db.query(`CREATE INDEX IF NOT EXISTS idx_messages_receiver_sender_readAt ON messages(receiverId, senderId, readAt)`).run();
 }
+
+// 1. Friendships: The final "Accepted" state
+// Using a unique index on (min, max) IDs prevents duplicate A-B and B-A rows.
+db.run(`
+    CREATE TABLE IF NOT EXISTS friendships (
+      user_a_id TEXT NOT NULL,
+      user_b_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_a_id, user_b_id),
+      FOREIGN KEY (user_a_id) REFERENCES user(id),
+      FOREIGN KEY (user_b_id) REFERENCES user(id)
+    )
+  `);
+
+// 2. Friend Requests: The "Handshake" state
+db.run(`
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id TEXT PRIMARY KEY,
+      from_user_id TEXT NOT NULL,
+      to_user_id TEXT NOT NULL,
+      status TEXT CHECK(status IN ('pending', 'accepted', 'rejected', 'cancelled')) DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(from_user_id, to_user_id)
+    )
+  `);
+
+// 3. User Privacy: Individual settings
+db.run(`
+    CREATE TABLE IF NOT EXISTS user_privacy (
+      user_id TEXT PRIMARY KEY,
+      allow_message_requests INTEGER DEFAULT 1, -- 1 for true, 0 for false
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES user(id)
+    )
+  `);
+
+// 4. Message Requests: The "First Contact"
+// Useful if you want to allow someone to send a message WITHOUT being a friend yet.
+db.run(`
+    CREATE TABLE IF NOT EXISTS message_requests (
+      id TEXT PRIMARY KEY,
+      from_user_id TEXT NOT NULL,
+      to_user_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT CHECK(status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(from_user_id, to_user_id)
+    )
+  `);
+
+// 5. Blocked users
+db.run(`
+    CREATE TABLE IF NOT EXISTS blocked_users (
+      user_id TEXT NOT NULL,
+      blocked_user_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, blocked_user_id),
+      FOREIGN KEY (user_id) REFERENCES user(id),
+      FOREIGN KEY (blocked_user_id) REFERENCES user(id)
+    )
+  `);
