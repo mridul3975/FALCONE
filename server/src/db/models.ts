@@ -96,6 +96,20 @@ export function initDb() {
   `).run();
 
   db.query(`
+    CREATE TABLE IF NOT EXISTS room_invites (
+      id TEXT PRIMARY KEY,
+      roomId TEXT NOT NULL,
+      fromUserId TEXT NOT NULL,
+      toUserId TEXT NOT NULL,
+      status TEXT DEFAULT 'pending', -- pending, accepted, rejected
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (roomId) REFERENCES rooms(id) ON DELETE CASCADE,
+      FOREIGN KEY (fromUserId) REFERENCES user(id) ON DELETE CASCADE,
+      FOREIGN KEY (toUserId) REFERENCES user(id) ON DELETE CASCADE
+    )
+  `).run();
+
+  db.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       senderId TEXT NOT NULL,

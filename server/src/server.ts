@@ -1255,16 +1255,6 @@ if (!allowsRequests) {
                 headers: { "Content-Type": "application/json" },
             }));
         }
-        // --- PRESENCE ENDPOINT ---
-        if (url.pathname === "/api/presence" && req.method === "GET") {
-            const session = await auth.api.getSession({ headers: req.headers });
-            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
-
-            return withCors(req, new Response(JSON.stringify(Array.from(onlineUsers)), {
-                headers: { "Content-Type": "application/json" }
-            }));
-        }
-
         // --- METADATA ENDPOINT ---
         if (url.pathname === "/api/metadata" && req.method === "GET") {
             const session = await auth.api.getSession({ headers: req.headers });
@@ -1296,41 +1286,35 @@ if (!allowsRequests) {
             }
         }
 
-        // --- GLOBAL SEARCH ENDPOINT ---
-        if (url.pathname === "/api/search/messages" && req.method === "GET") {
+        // --- MESSAGE SEND ENDPOINT ---
+        if (url.pathname === "/api/messages" && req.method === "POST") {
             const session = await auth.api.getSession({ headers: req.headers });
             if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
 
-            const q = new URL(req.url).searchParams.get("q");
-            if (!q) return withCors(req, new Response("Missing query", { status: 400 }));
+            const body = await req.json() as { targetId: string, content: string, type: "direct" | "room", replyToId?: string };
+            if (!body.targetId || !body.content || !body.type) {
+                return withCors(req, new Response("Missing fields", { status: 400 }));
+            }
 
-            const searchTerm = `%${q}%`;
-            
-            // Search private messages
-            const privateMsgs = db.query(`
-                SELECT m.*, u.name as sender_name 
-                FROM messages m
-                JOIN user u ON m.senderId = u.id
-                WHERE (m.senderId = ? OR m.receiverId = ?) AND m.content LIKE ?
-                ORDER BY m.createdAt DESC
-                LIMIT 50
-            `).all(session.user.id, session.user.id, searchTerm);
+            let savedMsg;
+            if (body.type === "room") {
+                savedMsg = roomRepo.saveRoomMessage(session.user.id, body.targetId, body.content, { replyToId: body.replyToId });
+                server.publish(body.targetId, JSON.stringify({
+                    type: "room_message",
+                    data: savedMsg
+                }));
+            } else {
+                savedMsg = messageRepo.savePrivateMessage(session.user.id, body.targetId, body.content, { replyToId: body.replyToId });
+                server.publish(body.targetId, JSON.stringify({
+                    type: "chat-message",
+                    data: savedMsg
+                }));
+            }
 
-            // Search room messages
-            const roomMsgs = db.query(`
-                SELECT rm.*, u.name as sender_name, r.name as room_name
-                FROM room_messages rm
-                JOIN user u ON rm.senderId = u.id
-                JOIN rooms r ON rm.roomId = r.id
-                WHERE rm.roomId IN (SELECT roomId FROM room_participants WHERE userId = ?) AND rm.content LIKE ?
-                ORDER BY rm.createdAt DESC
-                LIMIT 50
-            `).all(session.user.id, searchTerm);
-
-            return withCors(req, new Response(JSON.stringify({ private: privateMsgs, rooms: roomMsgs }), {
-                headers: { "Content-Type": "application/json" }
-            }));
+            return withCors(req, new Response(JSON.stringify(savedMsg), { headers: { "Content-Type": "application/json" } }));
         }
+
+
 
         // --- MESSAGE REACTIONS ---
         if (url.pathname === "/api/messages/react" && req.method === "POST") {
@@ -1347,17 +1331,16 @@ if (!allowsRequests) {
                 
                 // Broadcast reaction to others
                 // Find recipient/roomId to publish to
-                const msg = db.query("SELECT senderId, receiverId FROM messages WHERE id = ?").get(body.messageId) as any;
+                const msg = db.query("SELECT senderId, receiverId, roomId FROM messages WHERE id = ?").get(body.messageId) as any;
                 if (msg) {
-                    const to = msg.senderId === session.user.id ? msg.receiverId : msg.senderId;
-                    server.publish(to, JSON.stringify({
-                        type: "message_reaction",
-                        data: { messageId: body.messageId, userId: session.user.id, emoji: body.emoji }
-                    }));
-                } else {
-                    const rmsg = db.query("SELECT roomId FROM room_messages WHERE id = ?").get(body.messageId) as any;
-                    if (rmsg) {
-                        server.publish(rmsg.roomId, JSON.stringify({
+                    if (msg.roomId) {
+                        server.publish(msg.roomId, JSON.stringify({
+                            type: "message_reaction",
+                            data: { messageId: body.messageId, userId: session.user.id, emoji: body.emoji }
+                        }));
+                    } else {
+                        const to = msg.senderId === session.user.id ? msg.receiverId : msg.senderId;
+                        server.publish(to, JSON.stringify({
                             type: "message_reaction",
                             data: { messageId: body.messageId, userId: session.user.id, emoji: body.emoji }
                         }));
@@ -1389,6 +1372,8 @@ if (!allowsRequests) {
             if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
 
             const roomId = url.pathname.split("/")[3];
+            if (!roomId) return withCors(req, new Response("Bad Request: Missing roomId", { status: 400 }));
+
             const existing = db.query("SELECT id FROM room_join_requests WHERE roomId = ? AND userId = ? AND status = 'pending'").get(roomId, session.user.id);
             if (existing) return withCors(req, new Response("Request already pending", { status: 409 }));
 
@@ -1412,6 +1397,8 @@ if (!allowsRequests) {
             if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
 
             const roomId = url.pathname.split("/")[3];
+            if (!roomId) return withCors(req, new Response("Bad Request: Missing roomId", { status: 400 }));
+
             const room = db.query("SELECT creatorId FROM rooms WHERE id = ?").get(roomId) as { creatorId: string };
             if (room?.creatorId !== session.user.id) return withCors(req, new Response("Forbidden", { status: 403 }));
 
@@ -1430,6 +1417,8 @@ if (!allowsRequests) {
             if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
 
             const requestId = url.pathname.split("/")[4];
+            if (!requestId) return withCors(req, new Response("Bad Request: Missing requestId", { status: 400 }));
+
             const body = await req.json() as { action: 'accept' | 'reject' };
             
             const request = db.query("SELECT * FROM room_join_requests WHERE id = ?").get(requestId) as any;
@@ -1449,6 +1438,125 @@ if (!allowsRequests) {
                 type: "room_join_response",
                 data: { roomId: request.roomId, status: body.action === 'accept' ? 'accepted' : 'rejected' }
             }));
+
+            return withCors(req, new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }));
+        }
+
+        if (url.pathname === "/api/search" && req.method === "GET") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const q = url.searchParams.get("q") || "";
+            
+            const privateResults = db.query(`
+                SELECT m.*, u.name as sender_name
+                FROM messages m
+                JOIN user u ON m.senderId = u.id
+                WHERE (m.senderId = ? OR m.receiverId = ?)
+                  AND m.roomId IS NULL
+                  AND m.text LIKE ?
+                LIMIT 50
+            `).all(session.user.id, session.user.id, `%${q}%`);
+
+            const roomResults = db.query(`
+                SELECT m.*, r.name as room_name, u.name as sender_name
+                FROM messages m
+                JOIN rooms r ON m.roomId = r.id
+                JOIN user u ON m.senderId = u.id
+                JOIN room_members rm ON r.id = rm.roomId
+                WHERE rm.userId = ?
+                  AND m.text LIKE ?
+                LIMIT 50
+            `).all(session.user.id, `%${q}%`);
+
+            const discoveredRooms = db.query(`
+                SELECT id, name, creatorId, createdAt
+                FROM rooms
+                WHERE name LIKE ?
+                LIMIT 10
+            `).all(`%${q}%`);
+
+            return withCors(req, new Response(JSON.stringify({ 
+                private: privateResults, 
+                rooms: roomResults,
+                discoveredRooms
+            }), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+
+        if (url.pathname === "/api/rooms/join-requests" && req.method === "GET") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const requests = db.query(`
+                SELECT rjr.*, r.name as room_name, u.name as user_name
+                FROM room_join_requests rjr
+                JOIN rooms r ON rjr.roomId = r.id
+                JOIN user u ON rjr.userId = u.id
+                WHERE r.creatorId = ? AND rjr.status = 'pending'
+            `).all(session.user.id);
+
+            return withCors(req, new Response(JSON.stringify(requests), { headers: { "Content-Type": "application/json" } }));
+        }
+
+        // --- ROOM INVITES ---
+        if (url.pathname.match(/\/api\/rooms\/[^\/]+\/invite/) && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const roomId = url.pathname.split("/")[3];
+            if (!roomId) return withCors(req, new Response("Bad Request: Missing roomId", { status: 400 }));
+
+            const body = await req.json() as { userId: string };
+            
+            const room = db.query("SELECT creatorId FROM rooms WHERE id = ?").get(roomId) as { creatorId: string };
+            if (room?.creatorId !== session.user.id) return withCors(req, new Response("Forbidden", { status: 403 }));
+
+            const inviteId = crypto.randomUUID();
+            db.run("INSERT INTO room_invites (id, roomId, fromUserId, toUserId) VALUES (?, ?, ?, ?)", [inviteId, roomId, session.user.id, body.userId]);
+            
+            server.publish(body.userId, JSON.stringify({
+                type: "room_invite",
+                data: { inviteId, roomId, fromUserId: session.user.id }
+            }));
+
+            return withCors(req, new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }));
+        }
+
+        if (url.pathname === "/api/rooms/invites" && req.method === "GET") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const invites = db.query(`
+                SELECT ri.*, r.name as room_name, u.name as from_user_name
+                FROM room_invites ri
+                JOIN rooms r ON ri.roomId = r.id
+                JOIN user u ON ri.fromUserId = u.id
+                WHERE ri.toUserId = ? AND ri.status = 'pending'
+            `).all(session.user.id);
+
+            return withCors(req, new Response(JSON.stringify(invites), { headers: { "Content-Type": "application/json" } }));
+        }
+
+        if (url.pathname.match(/\/api\/rooms\/invites\/[^\/]+\/respond/) && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const inviteId = url.pathname.split("/")[4];
+            if (!inviteId) return withCors(req, new Response("Bad Request: Missing inviteId", { status: 400 }));
+
+            const body = await req.json() as { action: 'accept' | 'reject' };
+            
+            const invite = db.query("SELECT * FROM room_invites WHERE id = ? AND toUserId = ?").get(inviteId, session.user.id) as any;
+            if (!invite) return withCors(req, new Response("Not Found", { status: 404 }));
+
+            if (body.action === 'accept') {
+                db.run("UPDATE room_invites SET status = 'accepted' WHERE id = ?", [inviteId]);
+                db.run("INSERT OR IGNORE INTO room_members (roomId, userId) VALUES (?, ?)", [invite.roomId, session.user.id]);
+            } else {
+                db.run("UPDATE room_invites SET status = 'rejected' WHERE id = ?", [inviteId]);
+            }
 
             return withCors(req, new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }));
         }
@@ -1557,18 +1665,7 @@ if (!allowsRequests) {
                     return;
                 }
 
-                // --- TYPING INDICATOR ---
-                if (parsed.type === "typing") {
-                    const to = parsed.data?.to || parsed.to;
-                    const isTyping = parsed.data?.isTyping ?? true;
-                    if (to) {
-                        server.publish(to, JSON.stringify({
-                            type: "typing",
-                            data: { fromUserId: ws.data.userId, isTyping }
-                        }));
-                    }
-                    return;
-                }
+
             } catch (error) {
                 console.error("Error processing message:", error);
                 ws.send(JSON.stringify({ type: "error", message: "Failed to process message" }));
