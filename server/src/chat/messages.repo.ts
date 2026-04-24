@@ -17,6 +17,8 @@ export interface ChatMessage {
     deliveredAt: string | null;
     readAt: string | null;
     aiSource: string | null;
+    replyToId: string | null;
+    reactions?: Array<{ emoji: string, userId: string }>;
 }
 
 export const messageRepo = {
@@ -29,6 +31,7 @@ export const messageRepo = {
             fileName?: string | null;
             fileSize?: number | null;
             aiSource?: string | null;
+            replyToId?: string | null;
         },): ChatMessage => {
 
         // 1. 🚨 DEBUG TRACKER: Let's see exactly what values are making it to this function!
@@ -49,14 +52,11 @@ export const messageRepo = {
         const aiSource = options?.aiSource || null;
 
         try {
-            // 3. Wrapping "text" in quotes to prevent SQLite from thinking it's a command.
-            // 4. Using 7 explicit positional question marks to prevent any alignment bugs.
-
             db.query(`
             INSERT INTO messages
-                (id, senderId, receiverId, roomId, text, contentType, fileUrl, fileName, fileSize, status, timestamp, deliveredAt, readAt, aiSource)
+                (id, senderId, receiverId, roomId, text, contentType, fileUrl, fileName, fileSize, status, timestamp, deliveredAt, readAt, aiSource, replyToId)
             VALUES
-                (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
         `).run(
                 id,
                 senderId,
@@ -69,6 +69,7 @@ export const messageRepo = {
                 status,
                 timestamp.toISOString(),
                 aiSource,
+                options?.replyToId || null,
             );
 
             return {
@@ -86,6 +87,7 @@ export const messageRepo = {
                 deliveredAt: null,
                 readAt: null,
                 aiSource,
+                replyToId: options?.replyToId || null,
             };
         } catch (error) {
             console.error("❌ DB Save Error:", error);
@@ -93,10 +95,10 @@ export const messageRepo = {
         }
     },
     getConversation: (userId: string, otherUserId: string): ChatMessage[] => {
-        return db.query(`
+        const messages = db.query(`
             SELECT
                 id, senderId, receiverId, roomId, text, contentType, fileUrl, fileName, fileSize,
-                status, timestamp, deliveredAt, readAt, aiSource
+                status, timestamp, deliveredAt, readAt, aiSource, replyToId
             FROM messages
             WHERE
                 (senderId = $userId AND receiverId = $otherUserId)
@@ -107,6 +109,11 @@ export const messageRepo = {
             $userId: userId,
             $otherUserId: otherUserId,
         }) as ChatMessage[];
+
+        return messages.map(m => ({
+            ...m,
+            reactions: db.query("SELECT emoji, userId FROM message_reactions WHERE messageId = ?").all(m.id) as any[]
+        }));
     },
 
     markconversationAsDelivered: (userId: string, otherUserId: string): number => {

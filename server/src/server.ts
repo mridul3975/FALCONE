@@ -6,6 +6,8 @@ import { roomRepo } from "./chat/rooms.repo";
 import { getRoomMessages } from "./chat/rooms.repo";
 import { networkInterfaces } from "node:os";
 import db from "./db/connection";
+
+const onlineUsers = new Set<string>();
 import { askGemini } from "../gemini.ts";
 import type { Database } from "bun:sqlite";
 
@@ -517,11 +519,12 @@ LIMIT 50
             const session = await auth.api.getSession({ headers: req.headers });
             if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
 
-            type MessageRequest = { targetId?: string; content?: string; type?: "direct" | "room" };
+            type MessageRequest = { targetId?: string; content?: string; type?: "direct" | "room"; replyToId?: string };
             const body = (await req.json().catch(() => null)) as MessageRequest | null;
             const targetId = body?.targetId;
             const content = body?.content;
             const type = body?.type; // "direct" or "room"
+            const replyToId = body?.replyToId;
 
             if (!targetId || typeof content !== "string" || !type) {
                 return withCors(req, new Response("Bad Request", { status: 400 }));
@@ -566,6 +569,7 @@ LIMIT 50
                         session.user.id,
                         targetId,
                         normalizedContent,
+                        { replyToId }
                     );
 
                     const isGeminiTarget = targetId === GEMINI_BOT_ID;
@@ -597,7 +601,7 @@ LIMIT 50
                         aiSenderId,
                         aiReceiverId,
                         aiMessageContent,
-                        { aiSource: "gemini" },
+                        { aiSource: "gemini", replyToId: userMessage.id },
                     );
 
                     return withCors(
@@ -617,7 +621,7 @@ LIMIT 50
                         return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
                     }
 
-                    const userMessage = roomRepo.saveRoomMessage(session.user.id, targetId, normalizedContent);
+                    const userMessage = roomRepo.saveRoomMessage(session.user.id, targetId, normalizedContent, { replyToId });
 
                     const geminiMatch = normalizedContent.match(/^@gemini\s+(.+)$/i);
 
@@ -639,7 +643,7 @@ LIMIT 50
                         GEMINI_BOT_ID,
                         targetId,
                         aiText || "Sorry, I could not generate a response right now.",
-                        { aiSource: "gemini" },
+                        { aiSource: "gemini", replyToId: userMessage.id },
                     );
 
                     return withCors(
@@ -1220,6 +1224,134 @@ if (!allowsRequests) {
                 headers: { "Content-Type": "application/json" },
             }));
         }
+        // --- PRESENCE ENDPOINT ---
+        if (url.pathname === "/api/presence" && req.method === "GET") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            return withCors(req, new Response(JSON.stringify(Array.from(onlineUsers)), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        }
+
+        // --- METADATA ENDPOINT ---
+        if (url.pathname === "/api/metadata" && req.method === "GET") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const targetUrl = new URL(req.url).searchParams.get("url");
+            if (!targetUrl) return withCors(req, new Response("Missing url", { status: 400 }));
+
+            try {
+                const response = await fetch(targetUrl);
+                const html = await response.text();
+                
+                const getMeta = (property: string) => {
+                    const match = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i'))
+                               || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${property}["']`, 'i'));
+                    return match ? match[1] : null;
+                };
+
+                const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+                const title = getMeta("og:title") || (titleMatch ? titleMatch[1] : targetUrl);
+                const description = getMeta("og:description") || getMeta("description") || "";
+                const image = getMeta("og:image") || "";
+
+                return withCors(req, new Response(JSON.stringify({ title, description, image, url: targetUrl }), {
+                    headers: { "Content-Type": "application/json" }
+                }));
+            } catch (e) {
+                return withCors(req, new Response("Failed to fetch metadata", { status: 500 }));
+            }
+        }
+
+        // --- GLOBAL SEARCH ENDPOINT ---
+        if (url.pathname === "/api/search/messages" && req.method === "GET") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const q = new URL(req.url).searchParams.get("q");
+            if (!q) return withCors(req, new Response("Missing query", { status: 400 }));
+
+            const searchTerm = `%${q}%`;
+            
+            // Search private messages
+            const privateMsgs = db.query(`
+                SELECT m.*, u.name as sender_name 
+                FROM messages m
+                JOIN user u ON m.senderId = u.id
+                WHERE (m.senderId = ? OR m.receiverId = ?) AND m.content LIKE ?
+                ORDER BY m.createdAt DESC
+                LIMIT 50
+            `).all(session.user.id, session.user.id, searchTerm);
+
+            // Search room messages
+            const roomMsgs = db.query(`
+                SELECT rm.*, u.name as sender_name, r.name as room_name
+                FROM room_messages rm
+                JOIN user u ON rm.senderId = u.id
+                JOIN rooms r ON rm.roomId = r.id
+                WHERE rm.roomId IN (SELECT roomId FROM room_participants WHERE userId = ?) AND rm.content LIKE ?
+                ORDER BY rm.createdAt DESC
+                LIMIT 50
+            `).all(session.user.id, searchTerm);
+
+            return withCors(req, new Response(JSON.stringify({ private: privateMsgs, rooms: roomMsgs }), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        }
+
+        // --- MESSAGE REACTIONS ---
+        if (url.pathname === "/api/messages/react" && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const body = await req.json() as { messageId: string, emoji: string };
+            if (!body.messageId || !body.emoji) return withCors(req, new Response("Missing fields", { status: 400 }));
+
+            const id = crypto.randomUUID();
+            try {
+                db.run(`INSERT INTO message_reactions (id, messageId, userId, emoji) VALUES (?, ?, ?, ?)`, 
+                    [id, body.messageId, session.user.id, body.emoji]);
+                
+                // Broadcast reaction to others
+                // Find recipient/roomId to publish to
+                const msg = db.query("SELECT senderId, receiverId FROM messages WHERE id = ?").get(body.messageId) as any;
+                if (msg) {
+                    const to = msg.senderId === session.user.id ? msg.receiverId : msg.senderId;
+                    server.publish(to, JSON.stringify({
+                        type: "message_reaction",
+                        data: { messageId: body.messageId, userId: session.user.id, emoji: body.emoji }
+                    }));
+                } else {
+                    const rmsg = db.query("SELECT roomId FROM room_messages WHERE id = ?").get(body.messageId) as any;
+                    if (rmsg) {
+                        server.publish(rmsg.roomId, JSON.stringify({
+                            type: "message_reaction",
+                            data: { messageId: body.messageId, userId: session.user.id, emoji: body.emoji }
+                        }));
+                    }
+                }
+
+                return withCors(req, new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }));
+            } catch (e) {
+                // If already reacted, remove it (toggle)
+                db.run(`DELETE FROM message_reactions WHERE messageId = ? AND userId = ? AND emoji = ?`, 
+                    [body.messageId, session.user.id, body.emoji]);
+                return withCors(req, new Response(JSON.stringify({ ok: true, toggled: 'removed' }), { headers: { "Content-Type": "application/json" } }));
+            }
+        }
+
+        if (url.pathname === "/api/presence" && req.method === "GET") {
+            const users = db.query("SELECT id, lastSeen FROM user").all() as any[];
+            return withCors(req, new Response(JSON.stringify({
+                online: Array.from(onlineUsers),
+                lastSeen: users.reduce((acc, u) => ({ ...acc, [u.id]: u.lastSeen }), {})
+            }), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        }
+
         if (url.pathname.startsWith("/api/")) {
             return withCors(req, new Response("Not Found", { status: 404 }));
         }
@@ -1227,7 +1359,17 @@ if (!allowsRequests) {
     },
     websocket: {
         open(ws) {
-            ws.subscribe(ws.data.userId); // Subscribe to a channel specific to the user
+            ws.subscribe(ws.data.userId);
+            onlineUsers.add(ws.data.userId);
+            db.run("UPDATE user SET lastSeen = ? WHERE id = ?", [new Date().toISOString(), ws.data.userId]);
+
+            // Notify others
+            server.publish("global_presence", JSON.stringify({
+                type: "presence_change",
+                data: { userId: ws.data.userId, status: "online" }
+            }));
+            ws.subscribe("global_presence");
+
             console.log(`User ${ws.data.username} connected with ID ${ws.data.userId}`);
             ws.send(JSON.stringify({ type: "welcome", message: `Welcome ${ws.data.username}!` }));
         },
@@ -1300,6 +1442,32 @@ if (!allowsRequests) {
                     }));
                     return;
                 }
+
+                // --- TYPING INDICATOR ---
+                if (parsed.type === "typing") {
+                    const to = parsed.data?.to || parsed.to;
+                    const isTyping = parsed.data?.isTyping ?? true;
+                    if (to) {
+                        server.publish(to, JSON.stringify({
+                            type: "typing",
+                            data: { fromUserId: ws.data.userId, isTyping }
+                        }));
+                    }
+                    return;
+                }
+
+                // --- TYPING INDICATOR ---
+                if (parsed.type === "typing") {
+                    const to = parsed.data?.to || parsed.to;
+                    const isTyping = parsed.data?.isTyping ?? true;
+                    if (to) {
+                        server.publish(to, JSON.stringify({
+                            type: "typing",
+                            data: { fromUserId: ws.data.userId, isTyping }
+                        }));
+                    }
+                    return;
+                }
             } catch (error) {
                 console.error("Error processing message:", error);
                 ws.send(JSON.stringify({ type: "error", message: "Failed to process message" }));
@@ -1307,6 +1475,16 @@ if (!allowsRequests) {
         },
         close(ws) {
             ws.unsubscribe(ws.data.userId);
+            ws.unsubscribe("global_presence");
+            onlineUsers.delete(ws.data.userId);
+            db.run("UPDATE user SET lastSeen = ? WHERE id = ?", [new Date().toISOString(), ws.data.userId]);
+
+            // Notify others
+            server.publish("global_presence", JSON.stringify({
+                type: "presence_change",
+                data: { userId: ws.data.userId, status: "offline" }
+            }));
+
             console.log(`User ${ws.data.username} disconnected`);
         }
     },

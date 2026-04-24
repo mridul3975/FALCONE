@@ -33,6 +33,8 @@ interface MessageItem {
     status: "sent" | "delivered" | "read";
     deliveredAt: string | null;
     readAt: string | null;
+    replyToId?: string | null;
+    reactions?: Array<{ emoji: string, userId: string }>;
 }
 
 interface DashboardData {
@@ -80,6 +82,7 @@ type ServerMessage = {
     status?: "sent" | "delivered" | "read";
     deliveredAt?: string | null;
     readAt?: string | null;
+    replyToId?: string | null;
 };
 
 const mapServerMessage = (msg: ServerMessage): MessageItem => ({
@@ -91,6 +94,12 @@ const mapServerMessage = (msg: ServerMessage): MessageItem => ({
     status: msg.status ?? "sent",
     deliveredAt: msg.deliveredAt ?? null,
     readAt: msg.readAt ?? null,
+    replyToId: msg.replyToId ?? null,
+});
+
+const authHeaders = (token: string) => ({
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
 });
 
 const normalizeSearchText = (value: string) =>
@@ -124,6 +133,51 @@ const getStatusLabel = (msg: MessageItem) => {
     return "Sent";
 };
 
+const Skeleton = ({ className }: { className: string }) => (
+    <div className={`animate-pulse bg-[#2A2248] rounded ${className}`} />
+);
+
+const notifyUser = (title: string, body: string) => {
+    if ("Notification" in window && Notification.permission === "granted") {
+        new Notification(title, { body, icon: "/favicon.ico" });
+    }
+};
+
+const LinkPreview = ({ url }: { url: string }) => {
+    const [meta, setMeta] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchMeta = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/api/metadata?url=${encodeURIComponent(url)}`, {
+                    headers: { Authorization: `Bearer ${getBearerToken()}` }
+                });
+                if (res.ok) setMeta(await res.json());
+            } catch (e) {
+                console.error("Meta fetch failed", e);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchMeta();
+    }, [url]);
+
+    if (loading) return <Skeleton className="mt-2 h-24 w-full" />;
+    if (!meta || (!meta.title && !meta.image)) return null;
+
+    return (
+        <a href={url} target="_blank" rel="noreferrer" className="mt-2 flex flex-col overflow-hidden rounded border border-[#3A325B] bg-[#1A1434]/50 transition hover:bg-[#1A1434]">
+            {meta.image && <img src={meta.image} alt="" className="h-24 w-full object-cover" />}
+            <div className="p-3">
+                <p className="text-xs font-bold text-[#F1EDFF] line-clamp-1">{meta.title}</p>
+                {meta.description && <p className="mt-1 text-[10px] text-[#A298C3] line-clamp-2">{meta.description}</p>}
+                <p className="mt-2 text-[9px] text-[#6E62A3] uppercase tracking-wider">{new URL(url).hostname}</p>
+            </div>
+        </a>
+    );
+};
+
 type RoomHistoryMessage = {
     id: string;
     senderId: string;
@@ -137,10 +191,10 @@ const fetchSidebarData = async (
     if (!bearerToken) return null;
 
     const [usersRes, roomsRes] = await Promise.all([
-        fetch("http://localhost:3000/api/users", {
+        fetch(`${API_BASE}/api/users`, {
             headers: { Authorization: "Bearer " + bearerToken },
         }),
-        fetch("http://localhost:3000/api/rooms", {
+        fetch(`${API_BASE}/api/rooms`, {
             headers: { Authorization: "Bearer " + bearerToken },
         }),
     ]);
@@ -167,6 +221,36 @@ const DashboardPage = () => {
     const [sendError, setSendError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
+
+    const handleToggleReaction = async (messageId: string, emoji: string) => {
+        const bearerToken = getBearerToken();
+        if (!bearerToken) return;
+
+        try {
+            const res = await fetch(`${API_BASE}/api/messages/react`, {
+                method: "POST",
+                headers: authHeaders(bearerToken),
+                body: JSON.stringify({ messageId, emoji }),
+            });
+            if (res.ok) {
+                // Optimistically update or wait for WS? 
+                // Let's update locally for immediate feedback
+                setMessages(prev => prev.map(m => {
+                    if (m.id === messageId) {
+                        const existing = m.reactions?.find(r => r.userId === session?.user.id && r.emoji === emoji);
+                        const nextReactions = existing 
+                            ? m.reactions?.filter(r => r !== existing)
+                            : [...(m.reactions || []), { emoji, userId: session?.user.id! }];
+                        return { ...m, reactions: nextReactions };
+                    }
+                    return m;
+                }));
+            }
+        } catch (err) {
+            console.error("Reaction failed", err);
+        }
+    };
     const [messages, setMessages] = useState<MessageItem[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
     const currentUserId = session?.user.id;
@@ -181,7 +265,15 @@ const DashboardPage = () => {
             setActiveChat({ id: chatId, type: chatType });
         }
     }, [location.search]);
+    const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+    const [typingStatus, setTypingStatus] = useState<Record<string, boolean>>({});
+    const typingTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
+    const wsRef = useRef<WebSocket | null>(null);
+    const [lastSeen, setLastSeen] = useState<Record<string, string>>({});
     const [searchQuery, setSearchQuery] = useState("");
+    const [messageSearchQuery, setMessageSearchQuery] = useState("");
+    const [messageSearchResults, setMessageSearchResults] = useState<{ private: any[], rooms: any[] } | null>(null);
+    const [isSearchingMessages, setIsSearchingMessages] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const sortedFilteredUsers = data.users.filter(u => {
         const nameMatch = u.name?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -201,7 +293,7 @@ const DashboardPage = () => {
     const [unreadDirect, setUnreadDirect] = useState<Record<string, number>>({});
     const [unreadRooms, setUnreadRooms] = useState<Record<string, number>>({});
     const [lastSeenRooms, setLastSeenRooms] = useState<Record<string, string>>({});
-    const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | "requests" | null>(null);
+    const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | "requests" | "message_search" | null>(null);
     const [friendRequestsIncoming, setFriendRequestsIncoming] = useState<FriendRequestItem[]>([]);
     const [friendRequestsOutgoing, setFriendRequestsOutgoing] = useState<FriendRequestItem[]>([]);
     const [messageRequestsIncoming, setMessageRequestsIncoming] = useState<MessageRequestItem[]>([]);
@@ -317,7 +409,7 @@ const DashboardPage = () => {
             }
 
             if (bearerToken) {
-                const usersRes = await fetch("http://localhost:3000/api/users", {
+                const usersRes = await fetch(`${API_BASE}/api/users`, {
                     headers: { Authorization: `Bearer ${bearerToken}` },
                 });
 
@@ -334,7 +426,7 @@ const DashboardPage = () => {
                 }
             }
 
-            const res = await fetch(`http://localhost:3000/api/users/${rawQuery}`, {
+            const res = await fetch(`${API_BASE}/api/users/${rawQuery}`, {
                 headers: {
                     Authorization: `Bearer ${bearerToken}`,
                 },
@@ -358,6 +450,10 @@ const DashboardPage = () => {
     };
 
     useEffect(() => {
+        if ("Notification" in window && Notification.permission === "default") {
+            Notification.requestPermission();
+        }
+
         if (isPending || !session) return;
 
         const run = async () => {
@@ -366,6 +462,18 @@ const DashboardPage = () => {
                 const sidebar = await fetchSidebarData(setData);
                 if (sidebar) {
                     await refreshUnreadCounts(sidebar.users, sidebar.rooms);
+                }
+                try {
+                    const presenceRes = await fetch(`${API_BASE}/api/presence`, {
+                        headers: { Authorization: `Bearer ${getBearerToken()}` }
+                    });
+                    if (presenceRes.ok) {
+                        const presenceData = await presenceRes.json();
+                        setOnlineUsers(new Set(presenceData.online));
+                        setLastSeen(presenceData.lastSeen || {});
+                    }
+                } catch (e) {
+                    console.error("Failed to fetch presence", e);
                 }
                 await loadRequestData();
             } catch {
@@ -401,6 +509,7 @@ const DashboardPage = () => {
         const wsProtocol = API_BASE.startsWith("https://") ? "wss" : "ws";
         const wsUrl = API_BASE.replace(/^https?/, wsProtocol) + "/chat";
         const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
 
         ws.onmessage = async (event) => {
             try {
@@ -428,12 +537,66 @@ const DashboardPage = () => {
                         }
                     }
                 }
+
+                if (parsed.type === "chat-message" || parsed.type === "room_message") {
+                    const msg = mapServerMessage((parsed as any).data);
+                    // Only update messages if it's the current chat
+                    const isCorrectChat = (parsed.type === "chat-message" && activeChat.type === "direct" && (msg.senderId === activeChat.id || msg.senderId === session.user.id))
+                                       || (parsed.type === "room_message" && activeChat.type === "room" && (parsed as any).data.roomId === activeChat.id);
+                    
+                    if (isCorrectChat) {
+                        setMessages((prev) => [...prev, msg]);
+                    }
+
+                    if (document.visibilityState !== "visible") {
+                        const sender = parsed.type === "chat-message" ? `User ${msg.senderId}` : "Room";
+                        notifyUser(`New message from ${sender}`, msg.content);
+                    }
+                }
+
+                if (parsed.type === "message_reaction") {
+                    const { messageId, userId, emoji } = (parsed as any).data;
+                    setMessages((prev) => prev.map(m => {
+                        if (m.id === messageId) {
+                            const existing = m.reactions?.find(r => r.userId === userId && r.emoji === emoji);
+                            const nextReactions = existing 
+                                ? m.reactions?.filter(r => r !== existing)
+                                : [...(m.reactions || []), { emoji, userId }];
+                            return { ...m, reactions: nextReactions };
+                        }
+                        return m;
+                    }));
+                }
+
+                if (parsed.type === "presence_change") {
+                    const { userId, status, timestamp } = (parsed as any).data;
+                    setOnlineUsers((prev) => {
+                        const next = new Set(prev);
+                        if (status === "online") next.add(userId);
+                        else next.delete(userId);
+                        return next;
+                    });
+                    if (status === "offline" && timestamp) {
+                        setLastSeen(prev => ({ ...prev, [userId]: timestamp }));
+                    }
+                }
+
+                if (parsed.type === "typing") {
+                    const { fromUserId, isTyping } = (parsed as any).data;
+                    setTypingStatus((prev) => ({
+                        ...prev,
+                        [fromUserId]: isTyping
+                    }));
+                }
             } catch {
                 // ignore malformed ws payloads
             }
         };
 
-        return () => ws.close();
+        return () => {
+            ws.close();
+            wsRef.current = null;
+        };
     }, [session, activeChat.id, activeChat.type]);
 
 
@@ -468,8 +631,65 @@ const DashboardPage = () => {
         );
     };
 
+    const emitTyping = (isTyping: boolean) => {
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !activeChat.id || activeChat.type !== "direct") return;
+
+        wsRef.current.send(JSON.stringify({
+            type: "typing",
+            data: { to: activeChat.id, isTyping }
+        }));
+    };
+
+    const handleMessageInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setMessageDraft(val);
+
+        if (activeChat.type === "direct" && activeChat.id) {
+            // Start typing
+            if (!typingTimeoutRef.current[activeChat.id]) {
+                emitTyping(true);
+            }
+
+            // Clear old timeout
+            if (typingTimeoutRef.current[activeChat.id]) {
+                clearTimeout(typingTimeoutRef.current[activeChat.id]);
+            }
+
+            // Set new timeout to stop typing
+            typingTimeoutRef.current[activeChat.id] = setTimeout(() => {
+                emitTyping(false);
+                delete typingTimeoutRef.current[activeChat.id!];
+            }, 3000);
+        }
+    };
+    const handleMessageSearch = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!messageSearchQuery.trim()) return;
+
+        setIsSearchingMessages(true);
+        try {
+            const res = await fetch(`${API_BASE}/api/search/messages?q=${encodeURIComponent(messageSearchQuery)}`, {
+                headers: { Authorization: `Bearer ${getBearerToken()}` }
+            });
+            if (res.ok) {
+                setMessageSearchResults(await res.json());
+            }
+        } catch (err) {
+            console.error("Message search failed", err);
+        } finally {
+            setIsSearchingMessages(false);
+        }
+    };
     const handleSendMessage = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+
+        if (activeChat.type === "direct" && activeChat.id) {
+            emitTyping(false);
+            if (typingTimeoutRef.current[activeChat.id]) {
+                clearTimeout(typingTimeoutRef.current[activeChat.id]);
+                delete typingTimeoutRef.current[activeChat.id];
+            }
+        }
 
         if (!activeChat.id || !activeChat.type) {
             setSendError("Select a user or room before sending.");
@@ -497,7 +717,7 @@ const DashboardPage = () => {
             setIsSending(true);
             setSendError(null);
 
-            const response = await fetch("http://localhost:3000/api/messages", {
+            const response = await fetch(`${API_BASE}/api/messages`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -507,8 +727,10 @@ const DashboardPage = () => {
                     targetId: activeChat.id,
                     content: trimmedMessage,
                     type: activeChat.type,
+                    replyToId: replyingTo?.id,
                 }),
             });
+            setReplyingTo(null);
 
             if (!response.ok) {
                 const errText = await response.text();
@@ -521,7 +743,7 @@ const DashboardPage = () => {
                 setRequestActionInfo(payload.message);
                 setMessageDraft("");
                 // Refresh status
-                const endpoint = `http://localhost:3000/api/messages/${activeChat.id}`;
+                const endpoint = `${API_BASE}/api/messages/${activeChat.id}`;
                 const res = await fetch(endpoint, { headers: { Authorization: `Bearer ${bearerToken}` } });
                 if (res.ok) {
                     const data = await res.json();
@@ -872,6 +1094,18 @@ const DashboardPage = () => {
                         +
                     </button>
 
+                    <button
+                        type="button"
+                        onClick={() => setSidebarMode(sidebarMode === "message_search" ? null : "message_search")}
+                        className={`mt-4 flex w-full flex-col items-center gap-1 border px-2 py-2 text-[9px] tracking-[0.2em] uppercase transition ${sidebarMode === "message_search"
+                            ? "border-[#6C619A] bg-[#15122A] text-[#E6E3F5]"
+                            : "border-transparent text-[#7F78A3] hover:border-[#3A335A] hover:bg-[#0F0C21]"
+                            }`}
+                    >
+                        <span className="text-sm">⌕</span>
+                        Search
+                    </button>
+
                     <div className="mt-auto w-full border-t border-[#2B2545] pt-4 text-center">
                         <p className="text-[8px] tracking-[0.24em] text-[#9087B3] uppercase">Connected</p>
                         <p className="mt-1 text-[8px] tracking-[0.2em] text-[#635C84]">v1.0.42</p>
@@ -885,10 +1119,63 @@ const DashboardPage = () => {
                 >
                     <div className="flex h-full flex-col p-4">
                         <h3 className="mb-4 text-[11px] font-semibold tracking-[0.2em] text-[#D9D2F1] uppercase">
-                            {sidebarMode === "direct" ? "Direct Contacts" : sidebarMode === "room" ? "Rooms" : "Requests & Friends"}
+                            {sidebarMode === "direct" ? "Direct Contacts" : sidebarMode === "room" ? "Rooms" : sidebarMode === "message_search" ? "Search Messages" : "Requests & Friends"}
                         </h3>
 
                         <div className="flex-1 space-y-1.5 overflow-y-auto">
+                            {sidebarMode === "message_search" && (
+                                <div className="mb-4 space-y-3">
+                                    <form onSubmit={handleMessageSearch} className="relative">
+                                        <input
+                                            type="text"
+                                            value={messageSearchQuery}
+                                            onChange={(e) => setMessageSearchQuery(e.target.value)}
+                                            placeholder="Search messages..."
+                                            className="w-full border border-[#2B2450] bg-[#0F0C21] px-2.5 py-2 text-xs text-[#D9D2F1] outline-none focus:border-[#6C619A]"
+                                        />
+                                        {isSearchingMessages && <div className="absolute right-2 top-2 h-4 w-4 animate-spin border-2 border-emerald-500 border-t-transparent rounded-full" />}
+                                    </form>
+
+                                    {messageSearchResults && (
+                                        <div className="space-y-4">
+                                            {messageSearchResults.private.length > 0 && (
+                                                <div className="space-y-1.5">
+                                                    <p className="text-[9px] font-bold text-[#8D83B2] uppercase">Private</p>
+                                                    {messageSearchResults.private.map((m: any) => (
+                                                        <button
+                                                            key={m.id}
+                                                            onClick={() => setActiveChat({ id: m.senderId === session?.user.id ? m.receiverId : m.senderId, type: "direct" })}
+                                                            className="w-full rounded border border-[#2B2450] bg-[#0F0C21] p-2 text-left hover:border-[#4A4273]"
+                                                        >
+                                                            <p className="truncate text-[10px] font-bold text-[#D6D0EF]">{m.sender_name}</p>
+                                                            <p className="mt-0.5 line-clamp-2 text-[9px] text-[#8D83B2]">{m.content}</p>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {messageSearchResults.rooms.length > 0 && (
+                                                <div className="space-y-1.5">
+                                                    <p className="text-[9px] font-bold text-[#8D83B2] uppercase">Rooms</p>
+                                                    {messageSearchResults.rooms.map((m: any) => (
+                                                        <button
+                                                            key={m.id}
+                                                            onClick={() => setActiveChat({ id: m.roomId, type: "room" })}
+                                                            className="w-full rounded border border-[#2B2450] bg-[#0F0C21] p-2 text-left hover:border-[#4A4273]"
+                                                        >
+                                                            <p className="truncate text-[10px] font-bold text-[#D6D0EF]">{m.room_name} · {m.sender_name}</p>
+                                                            <p className="mt-0.5 line-clamp-2 text-[9px] text-[#8D83B2]">{m.content}</p>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {messageSearchResults.private.length === 0 && messageSearchResults.rooms.length === 0 && (
+                                                <p className="text-center text-[10px] text-[#8D83B2]">No results found.</p>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {sidebarMode === "direct"
                                 ? sortedFilteredUsers.map((u) => (
                                     <button
@@ -904,8 +1191,18 @@ const DashboardPage = () => {
                                             }`}
                                     >
                                         <div className="min-w-0 flex-1">
-                                            <p className="truncate font-medium">{u.name || u.email || "Unknown"}</p>
+                                            <div className="flex items-center gap-2">
+                                                <p className="truncate font-medium">{u.name || u.email || "Unknown"}</p>
+                                                {onlineUsers.has(u.id) && (
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                                                )}
+                                            </div>
                                             <p className="text-[9px] tracking-[0.08em] text-[#8178A0]">USER</p>
+                                            {!onlineUsers.has(u.id) && lastSeen[u.id] && (
+                                                <p className="mt-0.5 text-[8px] text-[#6E62A3]">
+                                                    Last seen: {new Date(lastSeen[u.id]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </p>
+                                            )}
                                         </div>
                                         {((unreadDirect[u.id] ?? 0) > 0) && (
                                             <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-[#D95A6F] px-1.5 py-0.5 text-[9px] font-bold text-white">
@@ -1154,7 +1451,13 @@ const DashboardPage = () => {
                         {!session && !isPending && (
                             <p className="mt-3 border border-amber-900/40 bg-amber-950/30 px-2 py-2 text-[9px] text-amber-300">Sign in to load contacts.</p>
                         )}
-                        {isLoading && <p className="mt-3 text-[9px] text-[#8D83B2]">Loading...</p>}
+                        {isLoading && (
+                            <div className="mt-4 space-y-3">
+                                <Skeleton className="h-8 w-full" />
+                                <Skeleton className="h-8 w-full" />
+                                <Skeleton className="h-8 w-full" />
+                            </div>
+                        )}
                         {error && <p className="mt-3 border border-rose-900/50 bg-rose-950/30 px-2 py-2 text-[9px] text-rose-300">Error: {error}</p>}
                     </div>
                 </div>
@@ -1167,10 +1470,51 @@ const DashboardPage = () => {
                             <div className="flex items-start justify-between border-b border-[#272043] px-8 py-6">
                                 <div>
                                     <p className="text-[10px] tracking-[0.28em] text-[#8D83B2] uppercase">Active Thread</p>
-                                    <h2 className="mt-2 text-4xl font-semibold tracking-[0.04em] text-[#F1EDFF]">{activeChat.id}</h2>
-                                    <p className="mt-1 text-[11px] tracking-[0.2em] text-[#A79FC8] uppercase">{activeChat.type}</p>
+                                    <div className="flex items-center gap-3">
+                                        <h2 className="mt-2 text-4xl font-semibold tracking-[0.04em] text-[#F1EDFF]">
+                                            {activeChat.type === "direct" 
+                                                ? (data.users.find(u => u.id === activeChat.id)?.name || activeChat.id)
+                                                : activeChat.id
+                                            }
+                                        </h2>
+                                        {activeChat.type === "direct" && onlineUsers.has(activeChat.id) && (
+                                            <div className="mt-3 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 border border-emerald-500/20">
+                                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                                <span className="text-[10px] font-bold tracking-wider text-emerald-400 uppercase">Online</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <p className="mt-1 text-[11px] tracking-[0.2em] text-[#A79FC8] uppercase">{activeChat.type}</p>
+                                        {activeChat.type === "direct" && typingStatus[activeChat.id] && (
+                                            <span className="mt-1 text-[11px] italic text-emerald-400 animate-pulse">is typing...</span>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="text-right text-[10px] tracking-[0.2em] text-[#7C739F] uppercase">REF.00.CHAT</div>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#6F62A3] hover:text-[#D6D0EF]"
+                                        title="Audio Call"
+                                    >
+                                        📞
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#6F62A3] hover:text-[#D6D0EF]"
+                                        title="Video Call"
+                                    >
+                                        📹
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setActiveChat({ id: null, type: null })}
+                                        className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#D95A6F] hover:text-[#D95A6F]"
+                                        title="Close Chat"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
                             </div>
                             {activeChat.type === "direct" && chatRestricted && activeChat.id && (
                                 <div className="border-b border-[#3A335D]/50 bg-[#14102B]/60 px-8 py-4 backdrop-blur-md">
@@ -1224,7 +1568,7 @@ const DashboardPage = () => {
                                             const senderName = isGeminiGenerated ? "Gemini" : getSenderDisplayName(msg.senderId);
                                             const avatarToken = getAvatarToken(senderName);
                                             return (
-                                                <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                                                <div key={msg.id} className={`group flex ${isMe ? "justify-end" : "justify-start"}`}>
                                                     <div className={`max-w-[70%] border px-4 py-3 ${isMe
                                                         ? "border-[#6F62A3] bg-[#2A2248] text-[#F0ECFF]"
                                                         : "border-[#3A335D] bg-[#14102B] text-[#CDC6EA]"
@@ -1244,6 +1588,11 @@ const DashboardPage = () => {
                                                             </span>
                                                         </div>
 
+                                                        {msg.replyToId && (
+                                                            <div className="mb-2 border-l-2 border-[#6F62A3] bg-black/20 p-2 text-[10px] italic text-[#A298C3]">
+                                                                {messages.find(m => m.id === msg.replyToId)?.content || "Message deleted"}
+                                                            </div>
+                                                        )}
                                                         {isGeminiGenerated ? (
                                                             <div className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">
                                                                 <ReactMarkdown
@@ -1278,8 +1627,60 @@ const DashboardPage = () => {
                                                                 </ReactMarkdown>
                                                             </div>
                                                         ) : (
-                                                            <p className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">{msg.content}</p>
+                                                            <>
+                                                                <p className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">{msg.content}</p>
+                                                                {(() => {
+                                                                    const urlMatch = msg.content.match(/https?:\/\/[^\s]+/);
+                                                                    return urlMatch ? <LinkPreview url={urlMatch[0]} /> : null;
+                                                                })()}
+                                                            </>
                                                         )}
+                                                        <div className="mt-2 flex flex-wrap items-center gap-1">
+                                                            {msg.reactions && msg.reactions.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1">
+                                                                    {Array.from(new Set(msg.reactions.map(r => r.emoji))).map(emoji => {
+                                                                        const count = msg.reactions?.filter(r => r.emoji === emoji).length;
+                                                                        const hasReacted = msg.reactions?.some(r => r.userId === currentUserId && r.emoji === emoji);
+                                                                        return (
+                                                                            <button
+                                                                                key={emoji}
+                                                                                onClick={() => handleToggleReaction(msg.id, emoji)}
+                                                                                className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] transition ${hasReacted
+                                                                                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-400"
+                                                                                    : "border-[#3A335D] bg-[#1C1736] text-[#8D83B2] hover:border-[#6F62A3]"
+                                                                                    }`}
+                                                                            >
+                                                                                <span>{emoji}</span>
+                                                                                {count! > 1 && <span>{count}</span>}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                            <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                {['👍', '❤️', '😂', '😮', '😢'].map(emoji => (
+                                                                    <button
+                                                                        key={emoji}
+                                                                        onClick={() => handleToggleReaction(msg.id, emoji)}
+                                                                        className="hover:scale-125 transition-transform"
+                                                                        title={emoji}
+                                                                    >
+                                                                        {emoji}
+                                                                    </button>
+                                                                ))}
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setReplyingTo(msg);
+                                                                        const input = document.querySelector('input[name="msg"]') as HTMLInputElement;
+                                                                        input?.focus();
+                                                                    }}
+                                                                    className="ml-1 text-[10px] text-[#6E62A3] hover:text-[#D6D0EF]"
+                                                                    title="Reply"
+                                                                >
+                                                                    Reply
+                                                                </button>
+                                                            </div>
+                                                        </div>
                                                         <div className="mt-2 flex items-center gap-2 text-[10px] tracking-[0.12em] uppercase">
                                                             <span className={isMe ? "text-[#BBB1DF]" : "text-[#8D83B2]"}>
                                                                 {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -1302,14 +1703,19 @@ const DashboardPage = () => {
                                 </div>
 
                                 <div className="border-t border-[#2B2448] bg-[#0E0A21] px-8 py-5">
+                                    {replyingTo && (
+                                        <div className="flex items-center justify-between border-t border-[#3E3563] bg-[#1A1434] px-4 py-2 text-[10px] text-[#A298C3]">
+                                            <div className="truncate">
+                                                <span className="font-bold">Replying to:</span> {replyingTo.content}
+                                            </div>
+                                            <button onClick={() => setReplyingTo(null)} className="ml-2 text-[#D95A6F] hover:text-white">✕</button>
+                                        </div>
+                                    )}
                                     <form className="flex gap-2" onSubmit={handleSendMessage}>
                                         <input
                                             name="msg"
                                             value={messageDraft}
-                                            onChange={(event) => {
-                                                const target = event.currentTarget as unknown as { value: string };
-                                                setMessageDraft(target.value);
-                                            }}
+                                            onChange={handleMessageInputChange}
                                             className="flex-1 border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
                                             placeholder={
                                                 activeChat.type === "direct" && relationshipStatus === "NONE"
