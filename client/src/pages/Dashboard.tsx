@@ -29,6 +29,7 @@ interface MessageItem {
     senderId: string;
     content: string;
     createdAt: string;
+    aiSource?: string | null;
     status: "sent" | "delivered" | "read";
     deliveredAt: string | null;
     readAt: string | null;
@@ -44,6 +45,7 @@ type ServerMessage = {
     senderId: string;
     text: string;
     timestamp: string;
+    aiSource?: string | null;
     status?: "sent" | "delivered" | "read";
     deliveredAt?: string | null;
     readAt?: string | null;
@@ -54,6 +56,7 @@ const mapServerMessage = (msg: ServerMessage): MessageItem => ({
     senderId: msg.senderId,
     content: msg.text,
     createdAt: msg.timestamp,
+    aiSource: msg.aiSource ?? null,
     status: msg.status ?? "sent",
     deliveredAt: msg.deliveredAt ?? null,
     readAt: msg.readAt ?? null,
@@ -732,8 +735,15 @@ const DashboardPage = () => {
                                 <div className="flex-1 space-y-4 overflow-y-auto px-8 py-6">
                                     {messages.length > 0 ? (
                                         messages.map((msg: MessageItem) => {
-                                            const isMe = msg.senderId === currentUserId;
-                                            const senderName = getSenderDisplayName(msg.senderId);
+                                            const isGeminiGenerated =
+                                                msg.senderId === "gemini-bot" ||
+                                                msg.aiSource === "gemini" ||
+                                                /^Gemini:\s*/i.test(msg.content);
+                                            const markdownContent = isGeminiGenerated
+                                                ? msg.content.replace(/^Gemini:\s*/i, "")
+                                                : msg.content;
+                                            const isMe = !isGeminiGenerated && msg.senderId === currentUserId;
+                                            const senderName = isGeminiGenerated ? "Gemini" : getSenderDisplayName(msg.senderId);
                                             const avatarToken = getAvatarToken(senderName);
                                             return (
                                                 <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
@@ -756,7 +766,7 @@ const DashboardPage = () => {
                                                             </span>
                                                         </div>
 
-                                                        {msg.senderId === "gemini-bot" ? (
+                                                        {isGeminiGenerated ? (
                                                             <div className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">
                                                                 <ReactMarkdown
                                                                     remarkPlugins={[remarkGfm]}
@@ -786,7 +796,7 @@ const DashboardPage = () => {
                                                                         ),
                                                                     }}
                                                                 >
-                                                                    {msg.content}
+                                                                    {markdownContent}
                                                                 </ReactMarkdown>
                                                             </div>
                                                         ) : (

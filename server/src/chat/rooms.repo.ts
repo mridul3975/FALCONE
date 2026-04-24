@@ -23,29 +23,36 @@ export const roomRepo = {
     },
 
     // 3. Save a message sent to a room
-    saveRoomMessage: (senderId: string, roomId: string, text: string) => {
+    saveRoomMessage: (
+        senderId: string,
+        roomId: string,
+        text: string,
+        options?: { aiSource?: string | null },
+    ) => {
         const id = crypto.randomUUID();
         const timestamp = new Date().toISOString();
         const status = "sent";
+        const aiSource = options?.aiSource || null;
 
         try {
             db.query(`
-                INSERT INTO messages (id, senderId, receiverId, roomId, "text", status, timestamp)
-                VALUES ($id, $senderId, NULL, $roomId, $text, $status, $timestamp)
+                INSERT INTO messages (id, senderId, receiverId, roomId, "text", status, timestamp, aiSource)
+                VALUES ($id, $senderId, NULL, $roomId, $text, $status, $timestamp, $aiSource)
             `).run({
                 $id: id,
                 $senderId: senderId,
                 $roomId: roomId, // Notice how receiverId is NULL, but roomId is set!
                 $text: text,
                 $status: status,
-                $timestamp: timestamp
+                $timestamp: timestamp,
+                $aiSource: aiSource,
             });
         } catch (error) {
             console.error("❌ Error saving room message:", error);
             throw error;
         }
 
-        return { id, senderId, receiverId: null, roomId, text, status, timestamp };
+        return { id, senderId, receiverId: null, roomId, text, status, timestamp, aiSource };
     }
 };
 
@@ -53,7 +60,7 @@ export function getRoomMessages(roomId: string, limit = 100) {
     try {
         const query = db.query(`
             SELECT 
-                m.id, m.senderId, m.roomId, m.text, m.status, m.timestamp
+                m.id, m.senderId, m.roomId, m.text, m.status, m.timestamp, m.aiSource
             FROM messages m
             WHERE m.roomId = $roomId
             ORDER BY m.timestamp ASC

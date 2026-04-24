@@ -138,6 +138,7 @@ function ensureMessageColumns() {
   if (!existing.has("fileSize")) alters.push(`ALTER TABLE messages ADD COLUMN fileSize INTEGER`);
   if (!existing.has("deliveredAt")) alters.push(`ALTER TABLE messages ADD COLUMN deliveredAt DATETIME`);
   if (!existing.has("readAt")) alters.push(`ALTER TABLE messages ADD COLUMN readAt DATETIME`);
+  if (!existing.has("aiSource")) alters.push(`ALTER TABLE messages ADD COLUMN aiSource TEXT`);
 
   for (const sql of alters) {
     db.query(sql).run();

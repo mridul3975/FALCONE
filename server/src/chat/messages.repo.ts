@@ -16,6 +16,7 @@ export interface ChatMessage {
     timestamp: string;
     deliveredAt: string | null;
     readAt: string | null;
+    aiSource: string | null;
 }
 
 export const messageRepo = {
@@ -27,6 +28,7 @@ export const messageRepo = {
             fileUrl?: string | null;
             fileName?: string | null;
             fileSize?: number | null;
+            aiSource?: string | null;
         },): ChatMessage => {
 
         // 1. 🚨 DEBUG TRACKER: Let's see exactly what values are making it to this function!
@@ -44,6 +46,7 @@ export const messageRepo = {
         const fileUrl = options?.fileUrl || null;
         const fileName = options?.fileName || null;
         const fileSize = options?.fileSize || null;
+        const aiSource = options?.aiSource || null;
 
         try {
             // 3. Wrapping "text" in quotes to prevent SQLite from thinking it's a command.
@@ -51,9 +54,9 @@ export const messageRepo = {
 
             db.query(`
             INSERT INTO messages
-                (id, senderId, receiverId, roomId, text, contentType, fileUrl, fileName, fileSize, status, timestamp, deliveredAt, readAt)
+                (id, senderId, receiverId, roomId, text, contentType, fileUrl, fileName, fileSize, status, timestamp, deliveredAt, readAt, aiSource)
             VALUES
-                (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
         `).run(
                 id,
                 senderId,
@@ -64,7 +67,8 @@ export const messageRepo = {
                 fileName,
                 fileSize,
                 status,
-                timestamp.toISOString()
+                timestamp.toISOString(),
+                aiSource,
             );
 
             return {
@@ -80,7 +84,8 @@ export const messageRepo = {
                 status,
                 timestamp: timestamp.toISOString(),
                 deliveredAt: null,
-                readAt: null
+                readAt: null,
+                aiSource,
             };
         } catch (error) {
             console.error("❌ DB Save Error:", error);
@@ -91,7 +96,7 @@ export const messageRepo = {
         return db.query(`
             SELECT
                 id, senderId, receiverId, roomId, text, contentType, fileUrl, fileName, fileSize,
-                status, timestamp, deliveredAt, readAt
+                status, timestamp, deliveredAt, readAt, aiSource
             FROM messages
             WHERE
                 (senderId = $userId AND receiverId = $otherUserId)

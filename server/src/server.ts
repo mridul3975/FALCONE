@@ -394,12 +394,13 @@ LIMIT 50
 
                     const aiSenderId = isGeminiTarget ? GEMINI_BOT_ID : session.user.id;
                     const aiReceiverId = isGeminiTarget ? session.user.id : targetId;
-                    const aiMessageContent = isGeminiTarget ? aiReplyText : `Gemini:\n${aiReplyText}`;
+                    const aiMessageContent = aiReplyText;
 
                     const aiMessage = messageRepo.savePrivateMessage(
                         aiSenderId,
                         aiReceiverId,
                         aiMessageContent,
+                        { aiSource: "gemini" },
                     );
 
                     return withCors(
@@ -441,6 +442,7 @@ LIMIT 50
                         GEMINI_BOT_ID,
                         targetId,
                         aiText || "Sorry, I could not generate a response right now.",
+                        { aiSource: "gemini" },
                     );
 
                     return withCors(
