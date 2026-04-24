@@ -766,10 +766,23 @@ if (!allowsRequests) {
 }
 
             const incoming = db
-                .query("SELECT * FROM friend_requests WHERE to_user_id = ? AND status = 'pending' ORDER BY created_at DESC")
+                .query(`
+                    SELECT fr.*, u.name as from_user_name 
+                    FROM friend_requests fr
+                    JOIN user u ON fr.from_user_id = u.id
+                    WHERE fr.to_user_id = ? AND fr.status = 'pending' 
+                    ORDER BY fr.created_at DESC
+                `)
                 .all(session.user.id);
+
             const outgoing = db
-                .query("SELECT * FROM friend_requests WHERE from_user_id = ? AND status = 'pending' ORDER BY created_at DESC")
+                .query(`
+                    SELECT fr.*, u.name as to_user_name 
+                    FROM friend_requests fr
+                    JOIN user u ON fr.to_user_id = u.id
+                    WHERE fr.from_user_id = ? AND fr.status = 'pending' 
+                    ORDER BY fr.created_at DESC
+                `)
                 .all(session.user.id);
 
             return withCors(req, new Response(JSON.stringify({ incoming, outgoing }), {
@@ -972,7 +985,12 @@ if (!allowsRequests) {
             if (!session) {
                 return withCors(req, new Response("Unauthorized", { status: 401 }));
             }
-            const messageRequests = db.query("SELECT * FROM message_requests WHERE to_user_id = ?").all(session.user.id);
+            const messageRequests = db.query(`
+                SELECT mr.*, u.name as from_user_name
+                FROM message_requests mr
+                JOIN user u ON mr.from_user_id = u.id
+                WHERE mr.to_user_id = ? AND mr.status = 'pending'
+            `).all(session.user.id);
             return withCors(req, new Response(JSON.stringify(messageRequests), {
                 headers: { "Content-Type": "application/json" },
             }));
