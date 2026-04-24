@@ -120,8 +120,23 @@ export function initDb() {
   }
 
   ensureSystemUsers();
-
+  ensureUserColumns();
+  ensureMessageColumns();
+  ensureRoomMessageColumns();
+  initReactionsTable();
   console.log("🗄️  Database schema initialized (Auth + Chat Tables complete)");
+}
+
+function ensureUserColumns() {
+  const columns = db
+    .query(`PRAGMA table_info(user)`)
+    .all() as Array<{ name: string }>;
+
+  const existing = new Set(columns.map((c) => c.name));
+
+  if (!existing.has("lastSeen")) {
+    db.query(`ALTER TABLE user ADD COLUMN lastSeen DATETIME`).run();
+  }
 }
 
 function ensureMessageColumns() {
@@ -139,6 +154,7 @@ function ensureMessageColumns() {
   if (!existing.has("deliveredAt")) alters.push(`ALTER TABLE messages ADD COLUMN deliveredAt DATETIME`);
   if (!existing.has("readAt")) alters.push(`ALTER TABLE messages ADD COLUMN readAt DATETIME`);
   if (!existing.has("aiSource")) alters.push(`ALTER TABLE messages ADD COLUMN aiSource TEXT`);
+  if (!existing.has("replyToId")) alters.push(`ALTER TABLE messages ADD COLUMN replyToId TEXT`);
 
   for (const sql of alters) {
     db.query(sql).run();
@@ -146,6 +162,34 @@ function ensureMessageColumns() {
 
   db.query(`CREATE INDEX IF NOT EXISTS idx_messages_receiver_sender_status ON messages(receiverId, senderId, status)`).run();
   db.query(`CREATE INDEX IF NOT EXISTS idx_messages_receiver_sender_readAt ON messages(receiverId, senderId, readAt)`).run();
+}
+
+function ensureRoomMessageColumns() {
+  const columns = db
+    .query(`PRAGMA table_info(room_messages)`)
+    .all() as Array<{ name: string }>;
+
+  const existing = new Set(columns.map((c) => c.name));
+
+  const alters: string[] = [];
+  if (!existing.has("replyToId")) alters.push(`ALTER TABLE room_messages ADD COLUMN replyToId TEXT`);
+
+  for (const sql of alters) {
+    db.query(sql).run();
+  }
+}
+
+function initReactionsTable() {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS message_reactions (
+      id TEXT PRIMARY KEY,
+      messageId TEXT NOT NULL,
+      userId TEXT NOT NULL,
+      emoji TEXT NOT NULL,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(messageId, userId, emoji)
+    )
+  `);
 }
 
 // 1. Friendships: The final "Accepted" state

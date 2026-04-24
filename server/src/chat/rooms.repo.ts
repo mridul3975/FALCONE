@@ -27,7 +27,7 @@ export const roomRepo = {
         senderId: string,
         roomId: string,
         text: string,
-        options?: { aiSource?: string | null },
+        options?: { aiSource?: string | null, replyToId?: string | null },
     ) => {
         const id = crypto.randomUUID();
         const timestamp = new Date().toISOString();
@@ -36,37 +36,42 @@ export const roomRepo = {
 
         try {
             db.query(`
-                INSERT INTO messages (id, senderId, receiverId, roomId, "text", status, timestamp, aiSource)
-                VALUES ($id, $senderId, NULL, $roomId, $text, $status, $timestamp, $aiSource)
+                INSERT INTO messages (id, senderId, receiverId, roomId, "text", status, timestamp, aiSource, replyToId)
+                VALUES ($id, $senderId, NULL, $roomId, $text, $status, $timestamp, $aiSource, $replyToId)
             `).run({
                 $id: id,
                 $senderId: senderId,
-                $roomId: roomId, // Notice how receiverId is NULL, but roomId is set!
+                $roomId: roomId,
                 $text: text,
                 $status: status,
                 $timestamp: timestamp,
                 $aiSource: aiSource,
+                $replyToId: options?.replyToId || null,
             });
         } catch (error) {
             console.error("❌ Error saving room message:", error);
             throw error;
         }
 
-        return { id, senderId, receiverId: null, roomId, text, status, timestamp, aiSource };
+        return { id, senderId, receiverId: null, roomId, text, status, timestamp, aiSource, replyToId: options?.replyToId || null };
     }
 };
 
 export function getRoomMessages(roomId: string, limit = 100) {
     try {
-        const query = db.query(`
+        const messages = db.query(`
             SELECT 
-                m.id, m.senderId, m.roomId, m.text, m.status, m.timestamp, m.aiSource
+                m.id, m.senderId, m.roomId, m.text, m.status, m.timestamp, m.aiSource, m.replyToId
             FROM messages m
             WHERE m.roomId = $roomId
             ORDER BY m.timestamp ASC
             LIMIT $limit
-        `);
-        return query.all({ $roomId: roomId, $limit: limit });
+        `).all({ $roomId: roomId, $limit: limit }) as any[];
+
+        return messages.map(m => ({
+            ...m,
+            reactions: db.query("SELECT emoji, userId FROM message_reactions WHERE messageId = ?").all(m.id)
+        }));
     } catch (error) {
         console.error("❌ Error fetching room messages:", error);
         throw error;
