@@ -7,6 +7,7 @@ import { getRoomMessages } from "./chat/rooms.repo";
 import { networkInterfaces } from "node:os";
 import db from "./db/connection";
 import { askGemini } from "../gemini.ts";
+import type { Database } from "bun:sqlite";
 
 
 
@@ -88,6 +89,57 @@ type WSContext = {
     userId: string;
     username: string;
 };
+
+//get relationship status
+
+type RelationshipStatus = "ACCEPTED" | "PENDING" | "NONE";
+
+function getRelationshipStatus(
+  db: Database,
+  userId: string,
+  otherUserId: string,
+): RelationshipStatus {
+  // Prevent self-conversation edge case from behaving like "no relation"
+  if (userId === otherUserId) return "ACCEPTED";
+
+  // friendships is stored in canonical order (user_a_id, user_b_id)
+  const [a, b] = userId < otherUserId
+    ? [userId, otherUserId]
+    : [otherUserId, userId];
+
+  const friendship = db
+    .query(
+      `
+      SELECT 1
+      FROM friendships
+      WHERE user_a_id = ? AND user_b_id = ?
+      LIMIT 1
+      `,
+    )
+    .get(a, b);
+
+  if (friendship) return "ACCEPTED";
+
+  const pendingRequest = db
+    .query(
+      `
+      SELECT 1
+      FROM friend_requests
+      WHERE (
+        (from_user_id = ? AND to_user_id = ?)
+        OR
+        (from_user_id = ? AND to_user_id = ?)
+      )
+      AND status = 'pending'
+      LIMIT 1
+      `,
+    )
+    .get(userId, otherUserId, otherUserId, userId);
+
+  if (pendingRequest) return "PENDING";
+
+  return "NONE";
+}
 
 const server = serve<WSContext>({
     port: PORT,
@@ -274,40 +326,71 @@ LIMIT 50
         }
 
         if (url.pathname.startsWith("/api/messages/")) {
-            const session = await auth.api.getSession({
-                headers: req.headers,
-            });
-            if (!session) {
-                return withCors(req, new Response("Unauthorized", { status: 401 }));
-            }
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
             const pathParts = url.pathname.split("/").filter(Boolean);
             const otherUserId = pathParts[pathParts.length - 1];
 
-            // --- 🚨 ADD THESE DEBUG LOGS ---
-            console.log(`\n🔍 DEBUG: Fetching history between Me(${session.user.id}) and Them(${otherUserId})`);
-
-
-
             if (!otherUserId) {
-                return withCors(req, new Response("Bad Request: Missing other user ID", { status: 400 }));
+                return withCors(req, new Response("Bad Request: Missing ID", { status: 400 }));
             }
-            const history = messageRepo.getConversation(session.user.id, otherUserId);
-            const deliveredCount = messageRepo.markconversationAsDelivered(session.user.id, otherUserId);
 
-            if (deliveredCount > 0) {
-                server.publish(otherUserId, JSON.stringify({
-                    type: "message-status",
-                    data: {
-                        fromUserId: session.user.id,
-                        status: "delivered",
-                        updatedCount: deliveredCount,
-                    },
+            // 1. Check Relationship Status FIRST
+            const status = getRelationshipStatus(db, session.user.id, otherUserId);
+
+            // 2. Handle GET Request (Fetching History)
+            if (req.method === "GET") {
+                // Only allow history fetch if they are friends
+                if (status !== "ACCEPTED") {
+                    return withCors(req, new Response(JSON.stringify({
+                        status: status,
+                        history: [],
+                        restricted: true
+                    }), { status: 200 }));
+                }
+
+                const history = messageRepo.getConversation(session.user.id, otherUserId);
+                const deliveredCount = messageRepo.markconversationAsDelivered(session.user.id, otherUserId);
+
+                // Notify other user that messages were seen/delivered
+                if (deliveredCount > 0) {
+                    server.publish(otherUserId, JSON.stringify({
+                        type: "message-status",
+                        data: { fromUserId: session.user.id, status: "delivered", updatedCount: deliveredCount }
+                    }));
+                }
+
+                return withCors(req, new Response(JSON.stringify(history), {
+                    headers: { "Content-Type": "application/json" },
                 }));
             }
 
-            return withCors(req, new Response(JSON.stringify(history), {
-                headers: { "Content-Type": "application/json" },
-            }));
+            // 3. Handle POST Request (Sending Message/Request)
+            if (req.method === "POST") {
+                const body = await req.json() as { content?: unknown };
+                const content = typeof body.content === "string" ? body.content.trim() : "";
+
+                if (!content) return withCors(req, new Response("Missing content", { status: 400 }));
+
+                if (status === "NONE") {
+                    db.run(`
+                INSERT INTO message_requests (id, from_user_id, to_user_id, content, status)
+                VALUES (?, ?, ?, ?, 'pending')
+            `, [crypto.randomUUID(), session.user.id, otherUserId, content]);
+
+                    return withCors(req, new Response(JSON.stringify({
+                        status: "request_sent",
+                        message: "Message request sent."
+                    }), { status: 201 }));
+                }
+
+                if (status === "PENDING") {
+                    return withCors(req, new Response("Request already pending", { status: 403 }));
+                }
+
+                // If status is ACCEPTED, your normal message saving logic goes here...
+            }
         }
 
         if (url.pathname === "/api/rooms" && req.method === "GET") {
@@ -487,6 +570,515 @@ LIMIT 50
             }
         }
 
+        // send friend request
+        if (url.pathname === "/api/friend-requests/send" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+
+            const body = (await req.json().catch(() => null)) as { toUserId?: unknown } | null;
+            const toUserId = typeof body?.toUserId === "string" ? body.toUserId.trim() : "";
+
+            if (!toUserId) {
+                return withCors(req, new Response("Bad Request: Missing toUserId", { status: 400 }));
+            }
+            if (toUserId === session.user.id) {
+                return withCors(req, new Response("Bad Request: Cannot friend yourself", { status: 400 }));
+            }
+
+            const target = db.query("SELECT id FROM user WHERE id = ? LIMIT 1").get(toUserId) as { id: string } | null;
+            if (!target) {
+                return withCors(req, new Response("Not Found: User does not exist", { status: 404 }));
+            }
+
+            const status = getRelationshipStatus(db, session.user.id, toUserId);
+            if (status === "ACCEPTED") {
+                return withCors(req, new Response("Already friends", { status: 409 }));
+            }
+            if (status === "PENDING") {
+                return withCors(req, new Response("Friend request already pending", { status: 409 }));
+            }
+
+            const requestId = crypto.randomUUID();
+            db.run(
+                "INSERT INTO friend_requests (id, from_user_id, to_user_id, status) VALUES (?, ?, ?, 'pending')",
+                [requestId, session.user.id, toUserId],
+            );
+
+            server.publish(
+                toUserId,
+                JSON.stringify({
+                    type: "friend-request-updated",
+                    data: {
+                        requestId,
+                        fromUserId: session.user.id,
+                        toUserId,
+                        status: "pending",
+                    },
+                }),
+            );
+
+            return withCors(req, new Response(JSON.stringify({ id: requestId, status: "pending" }), {
+                status: 201,
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+
+        // incoming/outgoing friend requests
+        if (url.pathname === "/api/friend-requests" && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const privacy = db
+  .query(
+    `SELECT allow_message_requests
+     FROM user_privacy
+     WHERE user_id = ?
+     LIMIT 1`,
+  )
+  .get(session.user.id) as { allow_message_requests: number } | null;
+
+// No row => allow by default
+const allowsRequests = privacy ? privacy.allow_message_requests === 1 : true;
+
+if (!allowsRequests) {
+  return withCors(req, new Response("User does not allow requests", { status: 403 }));
+}
+
+            const incoming = db
+                .query("SELECT * FROM friend_requests WHERE to_user_id = ? AND status = 'pending' ORDER BY created_at DESC")
+                .all(session.user.id);
+            const outgoing = db
+                .query("SELECT * FROM friend_requests WHERE from_user_id = ? AND status = 'pending' ORDER BY created_at DESC")
+                .all(session.user.id);
+
+            return withCors(req, new Response(JSON.stringify({ incoming, outgoing }), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+
+        // accept friend request
+        if (url.pathname === "/api/friend-requests/accept" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+
+            const body = (await req.json().catch(() => null)) as { requestId?: unknown } | null;
+            const requestId = typeof body?.requestId === "string" ? body.requestId.trim() : "";
+
+            if (!requestId) {
+                return withCors(req, new Response("Bad Request: Missing requestId", { status: 400 }));
+            }
+
+            const request = db
+                .query("SELECT * FROM friend_requests WHERE id = ? AND to_user_id = ? AND status = 'pending' LIMIT 1")
+                .get(requestId, session.user.id) as { from_user_id: string; to_user_id: string } | null;
+            if (!request) {
+                return withCors(req, new Response("Not Found: Pending request not found", { status: 404 }));
+            }
+
+            const [a, b] =
+                request.from_user_id < request.to_user_id
+                    ? [request.from_user_id, request.to_user_id]
+                    : [request.to_user_id, request.from_user_id];
+
+            db.run("UPDATE friend_requests SET status = 'accepted', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [requestId]);
+            db.run(
+                `UPDATE friend_requests
+                 SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+                 WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending'`,
+                [request.to_user_id, request.from_user_id],
+              );
+            db.run("INSERT OR IGNORE INTO friendships (user_a_id, user_b_id) VALUES (?, ?)", [a, b]);
+
+            server.publish(
+                request.from_user_id,
+                JSON.stringify({
+                    type: "friend-request-updated",
+                    data: {
+                        requestId,
+                        fromUserId: request.from_user_id,
+                        toUserId: request.to_user_id,
+                        status: "accepted",
+                    },
+                }),
+            );
+            server.publish(
+                request.to_user_id,
+                JSON.stringify({
+                    type: "friend-request-updated",
+                    data: {
+                        requestId,
+                        fromUserId: request.from_user_id,
+                        toUserId: request.to_user_id,
+                        status: "accepted",
+                    },
+                }),
+            );
+
+            return withCors(req, new Response(JSON.stringify({ ok: true, status: "accepted" }), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+
+        // reject friend request
+        if (url.pathname === "/api/friend-requests/reject" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const body = (await req.json().catch(() => null)) as { requestId?: unknown } | null;
+            const requestId = typeof body?.requestId === "string" ? body.requestId.trim() : "";
+            if (!requestId) {
+                return withCors(req, new Response("Bad Request: Missing requestId", { status: 400 }));
+            }
+
+            const result = db.run(
+                "UPDATE friend_requests SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND to_user_id = ? AND status = 'pending'",
+                [requestId, session.user.id],
+            );
+            if (result.changes === 0) {
+                return withCors(req, new Response("Not Found: Pending request not found", { status: 404 }));
+            }
+
+            const request = db
+                .query("SELECT from_user_id, to_user_id FROM friend_requests WHERE id = ? LIMIT 1")
+                .get(requestId) as { from_user_id: string; to_user_id: string } | null;
+            if (request) {
+                server.publish(
+                    request.from_user_id,
+                    JSON.stringify({
+                        type: "friend-request-updated",
+                        data: {
+                            requestId,
+                            fromUserId: request.from_user_id,
+                            toUserId: request.to_user_id,
+                            status: "rejected",
+                        },
+                    }),
+                );
+            }
+
+            return withCors(req, new Response(JSON.stringify({ ok: true, status: "rejected" }), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+
+        // cancel friend request
+        if (url.pathname === "/api/friend-requests/cancel" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const body = (await req.json().catch(() => null)) as { requestId?: unknown } | null;
+            const requestId = typeof body?.requestId === "string" ? body.requestId.trim() : "";
+            if (!requestId) {
+                return withCors(req, new Response("Bad Request: Missing requestId", { status: 400 }));
+            }
+
+            const result = db.run(
+                "UPDATE friend_requests SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND from_user_id = ? AND status = 'pending'",
+                [requestId, session.user.id],
+            );
+            if (result.changes === 0) {
+                return withCors(req, new Response("Not Found: Pending request not found", { status: 404 }));
+            }
+
+            const request = db
+                .query("SELECT from_user_id, to_user_id FROM friend_requests WHERE id = ? LIMIT 1")
+                .get(requestId) as { from_user_id: string; to_user_id: string } | null;
+            if (request) {
+                server.publish(
+                    request.to_user_id,
+                    JSON.stringify({
+                        type: "friend-request-updated",
+                        data: {
+                            requestId,
+                            fromUserId: request.from_user_id,
+                            toUserId: request.to_user_id,
+                            status: "cancelled",
+                        },
+                    }),
+                );
+            }
+
+            return withCors(req, new Response(JSON.stringify({ ok: true, status: "cancelled" }), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+
+ 
+
+        // get friends
+        if (url.pathname === "/api/friends" && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const friends = db.query(`
+                SELECT
+                    u.id,
+                    u.name,
+                    u.email,
+                    u.image,
+                    f.created_at AS friendedAt
+                FROM friendships f
+                JOIN user u
+                  ON u.id = CASE
+                      WHEN f.user_a_id = ? THEN f.user_b_id
+                      ELSE f.user_a_id
+                  END
+                WHERE f.user_a_id = ? OR f.user_b_id = ?
+                ORDER BY f.created_at DESC
+            `).all(session.user.id, session.user.id, session.user.id);
+            return withCors(req, new Response(JSON.stringify(friends), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+        //message requests
+        if (url.pathname === "/api/message-requests" && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const messageRequests = db.query("SELECT * FROM message_requests WHERE to_user_id = ?").all(session.user.id);
+            return withCors(req, new Response(JSON.stringify(messageRequests), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+        //message request send
+        if (url.pathname === "/api/message-requests/send" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const body = (await req.json().catch(() => null)) as { toUserId?: unknown } | null;
+            const toUserId = typeof body?.toUserId === "string" ? body.toUserId.trim() : "";
+            if (!toUserId) {
+                return withCors(req, new Response("Bad Request: Missing toUserId", { status: 400 }));
+            }
+            const requestId = crypto.randomUUID();
+            db.run(
+                "INSERT INTO message_requests (id, from_user_id, to_user_id, content, status) VALUES (?, ?, ?, ?, 'pending')",
+                [requestId, session.user.id, toUserId, ""],
+            );
+
+            server.publish(
+                toUserId,
+                JSON.stringify({
+                    type: "message-request-updated",
+                    data: {
+                        requestId,
+                        fromUserId: session.user.id,
+                        toUserId,
+                        status: "pending",
+                    },
+                }),
+            );
+
+            return withCors(req, new Response(JSON.stringify({ id: requestId, status: "pending" }), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+
+        //message request accept
+        if (url.pathname === "/api/message-requests/accept" && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+          
+            const body = (await req.json().catch(() => null)) as { requestId?: unknown } | null;
+            const requestId = typeof body?.requestId === "string" ? body.requestId.trim() : "";
+            if (!requestId) return withCors(req, new Response("Bad Request: Missing requestId", { status: 400 }));
+          
+            const request = db
+              .query(
+                `SELECT id, from_user_id, to_user_id, content
+                 FROM message_requests
+                 WHERE id = ? AND to_user_id = ? AND status = 'pending'
+                 LIMIT 1`,
+              )
+              .get(requestId, session.user.id) as
+              | { id: string; from_user_id: string; to_user_id: string; content: string }
+              | null;
+          
+            if (!request) return withCors(req, new Response("Not Found", { status: 404 }));
+          
+            db.run(
+              `UPDATE message_requests
+               SET status = 'accepted'
+               WHERE id = ?`,
+              [requestId],
+            );
+          
+            const [a, b] =
+              request.from_user_id < request.to_user_id
+                ? [request.from_user_id, request.to_user_id]
+                : [request.to_user_id, request.from_user_id];
+          
+            db.run(
+              `INSERT OR IGNORE INTO friendships (user_a_id, user_b_id)
+               VALUES (?, ?)`,
+              [a, b],
+            );
+
+            server.publish(
+              request.from_user_id,
+              JSON.stringify({
+                type: "message-request-updated",
+                data: {
+                  requestId,
+                  fromUserId: request.from_user_id,
+                  toUserId: request.to_user_id,
+                  status: "accepted",
+                },
+              }),
+            );
+            server.publish(
+              request.to_user_id,
+              JSON.stringify({
+                type: "message-request-updated",
+                data: {
+                  requestId,
+                  fromUserId: request.from_user_id,
+                  toUserId: request.to_user_id,
+                  status: "accepted",
+                },
+              }),
+            );
+          
+            return withCors(
+              req,
+              new Response(JSON.stringify({ ok: true, status: "accepted" }), {
+                headers: { "Content-Type": "application/json" },
+              }),
+            );
+          }
+
+        //message request reject
+        if (url.pathname === "/api/message-requests/reject" && req.method === "POST") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+          
+            const body = (await req.json().catch(() => null)) as { requestId?: unknown } | null;
+            const requestId = typeof body?.requestId === "string" ? body.requestId.trim() : "";
+            if (!requestId) return withCors(req, new Response("Bad Request: Missing requestId", { status: 400 }));
+          
+            const result = db.run(
+              `UPDATE message_requests
+               SET status = 'rejected'
+               WHERE id = ? AND to_user_id = ? AND status = 'pending'`,
+              [requestId, session.user.id],
+            );
+          
+            if (result.changes === 0) {
+              return withCors(req, new Response("Not Found", { status: 404 }));
+            }
+
+            const request = db
+              .query("SELECT from_user_id, to_user_id FROM message_requests WHERE id = ? LIMIT 1")
+              .get(requestId) as { from_user_id: string; to_user_id: string } | null;
+            if (request) {
+              server.publish(
+                request.from_user_id,
+                JSON.stringify({
+                  type: "message-request-updated",
+                  data: {
+                    requestId,
+                    fromUserId: request.from_user_id,
+                    toUserId: request.to_user_id,
+                    status: "rejected",
+                  },
+                }),
+              );
+            }
+          
+            return withCors(
+              req,
+              new Response(JSON.stringify({ ok: true, status: "rejected" }), {
+                headers: { "Content-Type": "application/json" },
+              }),
+            );
+          }
+
+        // unfriend
+        if (url.pathname === "/api/friends/unfriend" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const body = (await req.json().catch(() => null)) as { userId?: unknown } | null;
+            const userId = typeof body?.userId === "string" ? body.userId.trim() : "";
+            if (!userId) {
+                return withCors(req, new Response("Bad Request: Missing userId", { status: 400 }));
+            }
+
+            const [a, b] = session.user.id < userId ? [session.user.id, userId] : [userId, session.user.id];
+            const result = db.run("DELETE FROM friendships WHERE user_a_id = ? AND user_b_id = ?", [a, b]);
+            if (result.changes === 0) {
+                return withCors(req, new Response("Not Found: Friendship not found", { status: 404 }));
+            }
+
+            return withCors(req, new Response(JSON.stringify({ ok: true, unfriended: true }), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+        //block user
+        if (url.pathname === "/api/friends/block" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const body = await req.json() as { userId?: string } | null;
+            const userId = body?.userId?.trim();
+            if (!userId) {
+                return withCors(req, new Response("Bad Request: Missing userId", { status: 400 }));
+            }
+            const blockedUser = db.run("INSERT INTO blocked_users (user_id, blocked_user_id) VALUES (?, ?)", [session.user.id, userId]);
+            return withCors(req, new Response(JSON.stringify(blockedUser), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
+        //unblock user
+        if (url.pathname === "/api/friends/unblock" && req.method === "POST") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+            const body = await req.json() as { userId?: string } | null;
+            const userId = body?.userId?.trim();
+            if (!userId) {
+                return withCors(req, new Response("Bad Request: Missing userId", { status: 400 }));
+            }
+            const blockedUser = db.run("DELETE FROM blocked_users WHERE user_id = ? AND blocked_user_id = ?", [session.user.id, userId]);
+            return withCors(req, new Response(JSON.stringify(blockedUser), {
+                headers: { "Content-Type": "application/json" },
+            }));
+        }
         return new Response("Not Found", { status: 404 });
     },
     websocket: {
