@@ -235,6 +235,15 @@ export default function ProfilePage() {
                                                 ? "Sending..."
                                                 : "Message"}
                                 </button>
+
+                                {social?.relationshipStatus === "ACCEPTED" && (
+                                    <Link
+                                        to={`/dashboard?chatId=${profile.id}&chatType=direct`}
+                                        className="flex items-center justify-center border border-[#6E62A3] bg-[#2A2248] px-4 py-3 text-xs font-semibold tracking-[0.16em] text-[#F1EDFF] uppercase transition hover:bg-[#3A335D]"
+                                    >
+                                        Go to Messages
+                                    </Link>
+                                )}
                             </div>
 
                             {actionInfo && (

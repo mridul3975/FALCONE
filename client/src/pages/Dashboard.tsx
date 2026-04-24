@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { getBearerToken, useSession } from "../api/auth.ts";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -46,6 +46,8 @@ type FriendRequestItem = {
     to_user_id: string;
     status: "pending" | "accepted" | "rejected" | "cancelled";
     created_at?: string;
+    from_user_name?: string;
+    to_user_name?: string;
 };
 
 type MessageRequestItem = {
@@ -55,6 +57,8 @@ type MessageRequestItem = {
     content: string;
     status: "pending" | "accepted" | "rejected";
     created_at?: string;
+    from_user_name?: string;
+    to_user_name?: string;
 };
 
 type FriendListItem = {
@@ -166,6 +170,17 @@ const DashboardPage = () => {
     const [messages, setMessages] = useState<MessageItem[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
     const currentUserId = session?.user.id;
+    const location = useLocation();
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const chatId = params.get("chatId");
+        const chatType = params.get("chatType") as "direct" | "room" | null;
+
+        if (chatId && chatType) {
+            setActiveChat({ id: chatId, type: chatType });
+        }
+    }, [location.search]);
     const [searchQuery, setSearchQuery] = useState("");
     const [isSearching, setIsSearching] = useState(false);
     const sortedFilteredUsers = data.users.filter(u => {
@@ -932,7 +947,8 @@ const DashboardPage = () => {
                                                 )}
                                                 {friendRequestsIncoming.map((r) => (
                                                     <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF]">{r.from_user_id}</p>
+                                                        <p className="truncate text-[11px] text-[#D6D0EF] font-semibold">{r.from_user_name || r.from_user_id}</p>
+                                                        <p className="text-[9px] text-[#8D83B2] mb-2">Incoming Friend Request</p>
                                                         <div className="mt-2 flex gap-1">
                                                             <button
                                                                 type="button"
@@ -990,7 +1006,8 @@ const DashboardPage = () => {
                                                 )}
                                                 {friendRequestsOutgoing.map((r) => (
                                                     <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF]">{r.to_user_id}</p>
+                                                        <p className="truncate text-[11px] text-[#D6D0EF] font-semibold">{r.to_user_name || r.to_user_id}</p>
+                                                        <p className="text-[9px] text-[#8D83B2]">Outgoing Friend Request</p>
                                                         <button
                                                             type="button"
                                                             disabled={requestActionLoading === `f-cancel-${r.id}`}
@@ -1025,7 +1042,8 @@ const DashboardPage = () => {
                                                 )}
                                                 {messageRequestsIncoming.map((r) => (
                                                     <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF]">{r.from_user_id}</p>
+                                                        <p className="truncate text-[11px] text-[#D6D0EF] font-semibold">{r.from_user_name || r.from_user_id}</p>
+                                                        <p className="text-[9px] text-[#8D83B2]">Incoming Message Request</p>
                                                         <div className="mt-2 flex gap-1">
                                                             <button
                                                                 type="button"
