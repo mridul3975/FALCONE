@@ -102,7 +102,7 @@ function getRelationshipStatus(
   // Prevent self-conversation edge case from behaving like "no relation"
   if (userId === otherUserId) return "ACCEPTED";
 
-  // friendships is stored in canonical order (user_a_id, user_b_id)
+  // 1. Check friendships (canonical order)
   const [a, b] = userId < otherUserId
     ? [userId, otherUserId]
     : [otherUserId, userId];
@@ -120,7 +120,8 @@ function getRelationshipStatus(
 
   if (friendship) return "ACCEPTED";
 
-  const pendingRequest = db
+  // 2. Check friend_requests
+  const pendingFriendRequest = db
     .query(
       `
       SELECT 1
@@ -136,7 +137,43 @@ function getRelationshipStatus(
     )
     .get(userId, otherUserId, otherUserId, userId);
 
-  if (pendingRequest) return "PENDING";
+  if (pendingFriendRequest) return "PENDING";
+
+  // 3. Check message_requests
+  const messageRequest = db
+    .query(
+      `
+      SELECT status
+      FROM message_requests
+      WHERE (
+        (from_user_id = ? AND to_user_id = ?)
+        OR
+        (from_user_id = ? AND to_user_id = ?)
+      )
+      LIMIT 1
+      `,
+    )
+    .get(userId, otherUserId, otherUserId, userId) as { status: string } | null;
+
+  if (messageRequest) {
+    if (messageRequest.status === "accepted") return "ACCEPTED";
+    if (messageRequest.status === "pending") return "PENDING";
+  }
+
+  // 4. Check if they have already chatted (to support existing conversations)
+  const existingChat = db
+    .query(
+      `
+      SELECT 1
+      FROM messages
+      WHERE (senderId = ? AND receiverId = ?)
+         OR (senderId = ? AND receiverId = ?)
+      LIMIT 1
+      `,
+    )
+    .get(userId, otherUserId, otherUserId, userId);
+
+  if (existingChat) return "ACCEPTED";
 
   return "NONE";
 }
@@ -497,6 +534,34 @@ LIMIT 50
                         return withCors(req, new Response("Bad Request: Empty content", { status: 400 }));
                     }
 
+                    const status = getRelationshipStatus(db, session.user.id, targetId);
+
+                    if (status === "NONE") {
+                        // Create a message request
+                        const requestId = crypto.randomUUID();
+                        db.run(
+                            `INSERT INTO message_requests (id, from_user_id, to_user_id, content, status)
+                             VALUES (?, ?, ?, ?, 'pending')`,
+                            [requestId, session.user.id, targetId, normalizedContent]
+                        );
+
+                        // Also notify via WS
+                        server.publish(targetId, JSON.stringify({
+                            type: "message-request-updated",
+                            data: { requestId, fromUserId: session.user.id, toUserId: targetId, status: "pending" }
+                        }));
+
+                        return withCors(req, new Response(JSON.stringify({
+                            status: "request_sent",
+                            message: "Message request sent successfully."
+                        }), { status: 202 }));
+                    }
+
+                    if (status === "PENDING") {
+                        return withCors(req, new Response("Message request is still pending", { status: 403 }));
+                    }
+
+                    // Status is ACCEPTED
                     const userMessage = messageRepo.savePrivateMessage(
                         session.user.id,
                         targetId,
@@ -988,6 +1053,15 @@ if (!allowsRequests) {
                VALUES (?, ?)`,
               [a, b],
             );
+
+            // Migrate initial message to the messages table
+            if (request.content) {
+                messageRepo.savePrivateMessage(
+                    request.from_user_id,
+                    request.to_user_id,
+                    request.content
+                );
+            }
 
             server.publish(
               request.from_user_id,

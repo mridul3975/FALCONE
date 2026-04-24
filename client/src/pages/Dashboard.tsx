@@ -427,6 +427,10 @@ const DashboardPage = () => {
         | {
             userMessage: ServerMessage;
             aiMessage?: ServerMessage;
+        }
+        | {
+            status: "request_sent";
+            message: string;
         };
     const hasAiPayload = (
         payload: SendMessageResponse,
@@ -438,6 +442,17 @@ const DashboardPage = () => {
         );
     };
 
+    const isRequestSentResponse = (
+        payload: SendMessageResponse,
+    ): payload is { status: "request_sent"; message: string } => {
+        return (
+            typeof payload === "object" &&
+            payload !== null &&
+            "status" in payload &&
+            payload.status === "request_sent"
+        );
+    };
+
     const handleSendMessage = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
@@ -445,8 +460,8 @@ const DashboardPage = () => {
             setSendError("Select a user or room before sending.");
             return;
         }
-        if (activeChat.type === "direct" && chatRestricted) {
-            setSendError("You cannot send messages until request/friendship is accepted.");
+        if (activeChat.type === "direct" && relationshipStatus === "PENDING") {
+            setSendError("You cannot send more messages while your request is pending.");
             return;
         }
 
@@ -481,10 +496,27 @@ const DashboardPage = () => {
             });
 
             if (!response.ok) {
-                throw new Error("Failed to send message");
+                const errText = await response.text();
+                throw new Error(errText || "Failed to send message");
             }
 
             const payload = (await response.json()) as SendMessageResponse;
+
+            if (isRequestSentResponse(payload)) {
+                setRequestActionInfo(payload.message);
+                setMessageDraft("");
+                // Refresh status
+                const endpoint = `http://localhost:3000/api/messages/${activeChat.id}`;
+                const res = await fetch(endpoint, { headers: { Authorization: `Bearer ${bearerToken}` } });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (!Array.isArray(data)) {
+                        setRelationshipStatus(data.status ?? "PENDING");
+                        setChatRestricted(Boolean(data.restricted));
+                    }
+                }
+                return;
+            }
 
             if (hasAiPayload(payload)) {
                 setMessages((prev) => {
@@ -495,6 +527,8 @@ const DashboardPage = () => {
             } else {
                 setMessages((prev) => [...prev, mapServerMessage(payload)]);
             }
+
+            setMessageDraft("");
             const sidebar = await fetchSidebarData(setData);
             if (sidebar) {
                 await refreshUnreadCounts(sidebar.users, sidebar.rooms);
@@ -1121,54 +1155,36 @@ const DashboardPage = () => {
                                 <div className="text-right text-[10px] tracking-[0.2em] text-[#7C739F] uppercase">REF.00.CHAT</div>
                             </div>
                             {activeChat.type === "direct" && chatRestricted && activeChat.id && (
-                                <div className="border-b border-[#2B2448] bg-[#120E28] px-8 py-3">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <p className="text-[11px] text-[#CFC6EF]">
-                                            Chat restricted ({relationshipStatus}). Accept requests/friendship to unlock direct messaging.
-                                        </p>
-                                        {relationshipStatus === "NONE" ? (
+                                <div className="border-b border-[#3A335D]/50 bg-[#14102B]/60 px-8 py-4 backdrop-blur-md">
+                                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2A2248] text-[#9C93BE]">
+                                                {relationshipStatus === "PENDING" ? "⏳" : "🔒"}
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-semibold tracking-wide text-[#F1EDFF]">
+                                                    {relationshipStatus === "PENDING" ? "Request Pending" : "Message Request Required"}
+                                                </p>
+                                                <p className="text-[10px] text-[#8D83B2]">
+                                                    {relationshipStatus === "PENDING"
+                                                        ? "Waiting for the recipient to accept your chat request."
+                                                        : "You need to send a request to start chatting with this user."}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        {relationshipStatus === "NONE" && (
                                             <button
                                                 type="button"
-                                                disabled={requestActionLoading === `chat-send-friend-${activeChat.id}`}
                                                 onClick={() => {
-                                                    const bearerToken = getBearerToken();
-                                                    if (!bearerToken) return;
-                                                    runRequestAction(
-                                                        `chat-send-friend-${activeChat.id}`,
-                                                        () =>
-                                                            fetch(`${API_BASE}/api/friend-requests/send`, {
-                                                                method: "POST",
-                                                                headers: authHeaders(bearerToken),
-                                                                body: JSON.stringify({ toUserId: activeChat.id }),
-                                                            }),
-                                                        "Friend request sent",
-                                                    );
+                                                    // focus the input to prompt sending a message as request
+                                                    const input = document.querySelector('input[name="msg"]') as HTMLInputElement;
+                                                    input?.focus();
                                                 }}
-                                                className="border border-[#554A80] bg-[#251E42] px-3 py-2 text-[10px] tracking-[0.16em] uppercase text-[#F4F0FF]"
+                                                className="group relative overflow-hidden rounded border border-[#6E62A3] bg-[#2A2248] px-4 py-2 text-[10px] font-bold tracking-[0.12em] text-[#F1EDFF] uppercase transition hover:border-[#F1EDFF]"
                                             >
-                                                Send Friend Request
-                                            </button>
-                                        ) : (
-                                            <button
-                                                type="button"
-                                                disabled={requestActionLoading === `chat-send-msg-${activeChat.id}`}
-                                                onClick={() => {
-                                                    const bearerToken = getBearerToken();
-                                                    if (!bearerToken) return;
-                                                    runRequestAction(
-                                                        `chat-send-msg-${activeChat.id}`,
-                                                        () =>
-                                                            fetch(`${API_BASE}/api/message-requests/send`, {
-                                                                method: "POST",
-                                                                headers: authHeaders(bearerToken),
-                                                                body: JSON.stringify({ toUserId: activeChat.id }),
-                                                            }),
-                                                        "Message request sent",
-                                                    );
-                                                }}
-                                                className="border border-[#554A80] bg-[#251E42] px-3 py-2 text-[10px] tracking-[0.16em] uppercase text-[#F4F0FF]"
-                                            >
-                                                Send Message Request
+                                                <span className="relative z-10">Send Request via Message</span>
+                                                <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/5 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
                                             </button>
                                         )}
                                     </div>
@@ -1277,10 +1293,14 @@ const DashboardPage = () => {
                                                 setMessageDraft(target.value);
                                             }}
                                             className="flex-1 border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
-                                            placeholder="Transmit message..."
+                                            placeholder={
+                                                activeChat.type === "direct" && relationshipStatus === "NONE"
+                                                    ? "Send a message to start a conversation..."
+                                                    : "Transmit message..."
+                                            }
                                         />
                                         <button
-                                            disabled={isSending || (activeChat.type === "direct" && chatRestricted)}
+                                            disabled={isSending || (activeChat.type === "direct" && relationshipStatus === "PENDING")}
                                             className="border border-[#554A80] bg-[#251E42] px-6 py-3 text-xs font-semibold tracking-[0.18em] text-[#F4F0FF] uppercase transition hover:bg-[#32275A] disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {isSending ? "Sending" : "Send"}
