@@ -40,6 +40,33 @@ interface DashboardData {
     rooms: RoomItem[];
 }
 
+type FriendRequestItem = {
+    id: string;
+    from_user_id: string;
+    to_user_id: string;
+    status: "pending" | "accepted" | "rejected" | "cancelled";
+    created_at?: string;
+};
+
+type MessageRequestItem = {
+    id: string;
+    from_user_id: string;
+    to_user_id: string;
+    content: string;
+    status: "pending" | "accepted" | "rejected";
+    created_at?: string;
+};
+
+type FriendListItem = {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    image?: string | null;
+    friendedAt?: string;
+};
+
+type RelationshipStatus = "ACCEPTED" | "PENDING" | "NONE";
+
 type ServerMessage = {
     id: string;
     senderId: string;
@@ -67,6 +94,12 @@ const normalizeSearchText = (value: string) =>
         .toLowerCase()
         .trim()
         .replace(/\s+/g, " ");
+
+const API_BASE =
+    (import.meta as ImportMeta & { env: { VITE_API_BASE_URL?: string } }).env.VITE_API_BASE_URL ??
+    `${(globalThis as typeof globalThis & { location?: { protocol: string; hostname: string } }).location?.protocol ?? "http:"}//${(globalThis as typeof globalThis & {
+        location?: { protocol: string; hostname: string };
+    }).location?.hostname ?? "localhost"}:3000`;
 
 const getAvatarToken = (name: string) => {
     const trimmed = name.trim();
@@ -153,7 +186,16 @@ const DashboardPage = () => {
     const [unreadDirect, setUnreadDirect] = useState<Record<string, number>>({});
     const [unreadRooms, setUnreadRooms] = useState<Record<string, number>>({});
     const [lastSeenRooms, setLastSeenRooms] = useState<Record<string, string>>({});
-    const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | null>(null);
+    const [sidebarMode, setSidebarMode] = useState<"direct" | "room" | "requests" | null>(null);
+    const [friendRequestsIncoming, setFriendRequestsIncoming] = useState<FriendRequestItem[]>([]);
+    const [friendRequestsOutgoing, setFriendRequestsOutgoing] = useState<FriendRequestItem[]>([]);
+    const [messageRequestsIncoming, setMessageRequestsIncoming] = useState<MessageRequestItem[]>([]);
+    const [friends, setFriends] = useState<FriendListItem[]>([]);
+    const [requestActionError, setRequestActionError] = useState<string | null>(null);
+    const [requestActionInfo, setRequestActionInfo] = useState<string | null>(null);
+    const [requestActionLoading, setRequestActionLoading] = useState<string | null>(null);
+    const [relationshipStatus, setRelationshipStatus] = useState<RelationshipStatus>("ACCEPTED");
+    const [chatRestricted, setChatRestricted] = useState(false);
 
     const openUserProfile = (userId: string) => {
         const id = userId.trim();
@@ -174,6 +216,58 @@ const DashboardPage = () => {
 
         const found = data.users.find((u) => u.id === senderId);
         return found?.name?.trim() || found?.email?.trim() || senderId.slice(0, 8);
+    };
+
+    const authHeaders = (bearerToken: string) => ({
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${bearerToken}`,
+    });
+
+    const loadRequestData = async () => {
+        const bearerToken = getBearerToken();
+        if (!bearerToken) return;
+
+        const [friendReqRes, messageReqRes, friendsRes] = await Promise.all([
+            fetch(`${API_BASE}/api/friend-requests`, { headers: { Authorization: `Bearer ${bearerToken}` } }),
+            fetch(`${API_BASE}/api/message-requests`, { headers: { Authorization: `Bearer ${bearerToken}` } }),
+            fetch(`${API_BASE}/api/friends`, { headers: { Authorization: `Bearer ${bearerToken}` } }),
+        ]);
+
+        if (friendReqRes.ok) {
+            const payload = (await friendReqRes.json()) as {
+                incoming: FriendRequestItem[];
+                outgoing: FriendRequestItem[];
+            };
+            setFriendRequestsIncoming(payload.incoming ?? []);
+            setFriendRequestsOutgoing(payload.outgoing ?? []);
+        }
+        if (messageReqRes.ok) {
+            const payload = (await messageReqRes.json()) as MessageRequestItem[];
+            setMessageRequestsIncoming(payload.filter((r) => r.status === "pending"));
+        }
+        if (friendsRes.ok) {
+            const payload = (await friendsRes.json()) as FriendListItem[];
+            setFriends(payload);
+        }
+    };
+
+    const runRequestAction = async (key: string, action: () => Promise<Response>, successMessage: string) => {
+        try {
+            setRequestActionLoading(key);
+            setRequestActionError(null);
+            setRequestActionInfo(null);
+            const res = await action();
+            if (!res.ok) {
+                const message = await res.text();
+                throw new Error(message || "Action failed");
+            }
+            setRequestActionInfo(successMessage);
+            await loadRequestData();
+        } catch (err) {
+            setRequestActionError(err instanceof Error ? err.message : "Action failed");
+        } finally {
+            setRequestActionLoading(null);
+        }
     };
 
 
@@ -258,6 +352,7 @@ const DashboardPage = () => {
                 if (sidebar) {
                     await refreshUnreadCounts(sidebar.users, sidebar.rooms);
                 }
+                await loadRequestData();
             } catch {
                 setError("Failed to load data");
             } finally {
@@ -277,6 +372,7 @@ const DashboardPage = () => {
                 if (sidebar) {
                     await refreshUnreadCounts(sidebar.users, sidebar.rooms);
                 }
+                await loadRequestData();
             } catch {
                 // keep silent during polling
             }
@@ -284,6 +380,46 @@ const DashboardPage = () => {
 
         return () => clearInterval(id);
     }, [session, activeChat.id, activeChat.type, lastSeenRooms]);
+
+    useEffect(() => {
+        if (!session) return;
+        const wsProtocol = API_BASE.startsWith("https://") ? "wss" : "ws";
+        const wsUrl = API_BASE.replace(/^https?/, wsProtocol) + "/chat";
+        const ws = new WebSocket(wsUrl);
+
+        ws.onmessage = async (event) => {
+            try {
+                const parsed = JSON.parse(String(event.data)) as {
+                    type?: string;
+                    data?: { status?: string; toUserId?: string; fromUserId?: string };
+                };
+                if (parsed.type === "friend-request-updated" || parsed.type === "message-request-updated") {
+                    await loadRequestData();
+                    if (activeChat.type === "direct" && activeChat.id) {
+                        const bearerToken = getBearerToken();
+                        if (bearerToken) {
+                            const res = await fetch(`${API_BASE}/api/messages/${activeChat.id}`, {
+                                headers: { Authorization: `Bearer ${bearerToken}` },
+                            });
+                            if (res.ok) {
+                                const payload = (await res.json()) as
+                                    | ServerMessage[]
+                                    | { status: RelationshipStatus; history: ServerMessage[]; restricted: boolean };
+                                if (!Array.isArray(payload)) {
+                                    setRelationshipStatus(payload.status ?? "NONE");
+                                    setChatRestricted(Boolean(payload.restricted));
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch {
+                // ignore malformed ws payloads
+            }
+        };
+
+        return () => ws.close();
+    }, [session, activeChat.id, activeChat.type]);
 
 
     type SendMessageResponse =
@@ -307,6 +443,10 @@ const DashboardPage = () => {
 
         if (!activeChat.id || !activeChat.type) {
             setSendError("Select a user or room before sending.");
+            return;
+        }
+        if (activeChat.type === "direct" && chatRestricted) {
+            setSendError("You cannot send messages until request/friendship is accepted.");
             return;
         }
 
@@ -399,8 +539,20 @@ const DashboardPage = () => {
                     throw new Error("Failed to fetch messages");
                 }
 
-                const chatHistory = (await response.json()) as ServerMessage[];
-                setMessages(chatHistory.map(mapServerMessage));
+                const payload = (await response.json()) as
+                    | ServerMessage[]
+                    | { status: RelationshipStatus; history: ServerMessage[]; restricted: boolean };
+                const effectiveHistory = Array.isArray(payload) ? payload : (payload.history ?? []);
+
+                if (activeChat.type === "direct" && !Array.isArray(payload)) {
+                    setRelationshipStatus(payload.status ?? "NONE");
+                    setChatRestricted(Boolean(payload.restricted));
+                    setMessages(effectiveHistory.map(mapServerMessage));
+                } else {
+                    setRelationshipStatus("ACCEPTED");
+                    setChatRestricted(false);
+                    setMessages(effectiveHistory.map(mapServerMessage));
+                }
 
                 if (activeChat.type === "direct") {
                     await fetch("http://localhost:3000/api/messages/mark-read", {
@@ -425,7 +577,7 @@ const DashboardPage = () => {
 
                     setUnreadDirect((prev) => ({ ...prev, [activeChat.id as string]: 0 }));
                 } else {
-                    const roomHistory = chatHistory as RoomHistoryMessage[];
+                    const roomHistory = effectiveHistory as RoomHistoryMessage[];
                     const latest = roomHistory.length > 0 ? roomHistory[roomHistory.length - 1]?.timestamp ?? null : null;
                     if (latest) {
                         setLastSeenRooms((prev) => ({ ...prev, [activeChat.id as string]: latest }));
@@ -433,6 +585,8 @@ const DashboardPage = () => {
                     setUnreadRooms((prev) => ({ ...prev, [activeChat.id as string]: 0 }));
                 }
             } catch {
+                setRelationshipStatus("NONE");
+                setChatRestricted(false);
                 setMessages([]);
             }
         };
@@ -631,6 +785,18 @@ const DashboardPage = () => {
 
                     <button
                         type="button"
+                        onClick={() => setSidebarMode(sidebarMode === "requests" ? null : "requests")}
+                        className={`mb-4 flex w-full flex-col items-center gap-1 border px-2 py-2 text-[9px] tracking-[0.2em] uppercase transition ${sidebarMode === "requests"
+                            ? "border-[#6C619A] bg-[#15122A] text-[#E6E3F5]"
+                            : "border-transparent text-[#7F78A3] hover:border-[#3A335A] hover:bg-[#0F0C21]"
+                            }`}
+                    >
+                        <span className="text-sm">◇</span>
+                        Requests
+                    </button>
+
+                    <button
+                        type="button"
                         onClick={() => {
                             setCreateRoomError(null);
                             setShowCreateRoomModal(true);
@@ -654,7 +820,7 @@ const DashboardPage = () => {
                 >
                     <div className="flex h-full flex-col p-4">
                         <h3 className="mb-4 text-[11px] font-semibold tracking-[0.2em] text-[#D9D2F1] uppercase">
-                            {sidebarMode === "direct" ? "Direct Contacts" : "Rooms"}
+                            {sidebarMode === "direct" ? "Direct Contacts" : sidebarMode === "room" ? "Rooms" : "Requests & Friends"}
                         </h3>
 
                         <div className="flex-1 space-y-1.5 overflow-y-auto">
@@ -683,7 +849,7 @@ const DashboardPage = () => {
                                         )}
                                     </button>
                                 ))
-                                : data.rooms.map((r) => (
+                                : sidebarMode === "room" ? data.rooms.map((r) => (
                                     <button
                                         key={r.id}
                                         type="button"
@@ -706,9 +872,217 @@ const DashboardPage = () => {
                                             </span>
                                         )}
                                     </button>
-                                ))}
+                                )) : (
+                                    <div className="space-y-4">
+                                        <div>
+                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Incoming Friend Requests</p>
+                                            <div className="space-y-1">
+                                                {friendRequestsIncoming.length === 0 && (
+                                                    <p className="text-[10px] text-[#7F78A3]">No pending requests</p>
+                                                )}
+                                                {friendRequestsIncoming.map((r) => (
+                                                    <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
+                                                        <p className="truncate text-[11px] text-[#D6D0EF]">{r.from_user_id}</p>
+                                                        <div className="mt-2 flex gap-1">
+                                                            <button
+                                                                type="button"
+                                                                disabled={requestActionLoading === `f-accept-${r.id}`}
+                                                                onClick={() => {
+                                                                    const bearerToken = getBearerToken();
+                                                                    if (!bearerToken) return;
+                                                                    runRequestAction(
+                                                                        `f-accept-${r.id}`,
+                                                                        () =>
+                                                                            fetch(`${API_BASE}/api/friend-requests/accept`, {
+                                                                                method: "POST",
+                                                                                headers: authHeaders(bearerToken),
+                                                                                body: JSON.stringify({ requestId: r.id }),
+                                                                            }),
+                                                                        "Friend request accepted",
+                                                                    );
+                                                                }}
+                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
+                                                            >
+                                                                Accept
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={requestActionLoading === `f-reject-${r.id}`}
+                                                                onClick={() => {
+                                                                    const bearerToken = getBearerToken();
+                                                                    if (!bearerToken) return;
+                                                                    runRequestAction(
+                                                                        `f-reject-${r.id}`,
+                                                                        () =>
+                                                                            fetch(`${API_BASE}/api/friend-requests/reject`, {
+                                                                                method: "POST",
+                                                                                headers: authHeaders(bearerToken),
+                                                                                body: JSON.stringify({ requestId: r.id }),
+                                                                            }),
+                                                                        "Friend request rejected",
+                                                                    );
+                                                                }}
+                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
+                                                            >
+                                                                Reject
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Outgoing Friend Requests</p>
+                                            <div className="space-y-1">
+                                                {friendRequestsOutgoing.length === 0 && (
+                                                    <p className="text-[10px] text-[#7F78A3]">No outgoing requests</p>
+                                                )}
+                                                {friendRequestsOutgoing.map((r) => (
+                                                    <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
+                                                        <p className="truncate text-[11px] text-[#D6D0EF]">{r.to_user_id}</p>
+                                                        <button
+                                                            type="button"
+                                                            disabled={requestActionLoading === `f-cancel-${r.id}`}
+                                                            onClick={() => {
+                                                                const bearerToken = getBearerToken();
+                                                                if (!bearerToken) return;
+                                                                runRequestAction(
+                                                                    `f-cancel-${r.id}`,
+                                                                    () =>
+                                                                        fetch(`${API_BASE}/api/friend-requests/cancel`, {
+                                                                            method: "POST",
+                                                                            headers: authHeaders(bearerToken),
+                                                                            body: JSON.stringify({ requestId: r.id }),
+                                                                        }),
+                                                                    "Friend request cancelled",
+                                                                );
+                                                            }}
+                                                            className="mt-2 border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Incoming Message Requests</p>
+                                            <div className="space-y-1">
+                                                {messageRequestsIncoming.length === 0 && (
+                                                    <p className="text-[10px] text-[#7F78A3]">No pending requests</p>
+                                                )}
+                                                {messageRequestsIncoming.map((r) => (
+                                                    <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
+                                                        <p className="truncate text-[11px] text-[#D6D0EF]">{r.from_user_id}</p>
+                                                        <div className="mt-2 flex gap-1">
+                                                            <button
+                                                                type="button"
+                                                                disabled={requestActionLoading === `m-accept-${r.id}`}
+                                                                onClick={() => {
+                                                                    const bearerToken = getBearerToken();
+                                                                    if (!bearerToken) return;
+                                                                    runRequestAction(
+                                                                        `m-accept-${r.id}`,
+                                                                        () =>
+                                                                            fetch(`${API_BASE}/api/message-requests/accept`, {
+                                                                                method: "POST",
+                                                                                headers: authHeaders(bearerToken),
+                                                                                body: JSON.stringify({ requestId: r.id }),
+                                                                            }),
+                                                                        "Message request accepted",
+                                                                    );
+                                                                }}
+                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
+                                                            >
+                                                                Accept
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={requestActionLoading === `m-reject-${r.id}`}
+                                                                onClick={() => {
+                                                                    const bearerToken = getBearerToken();
+                                                                    if (!bearerToken) return;
+                                                                    runRequestAction(
+                                                                        `m-reject-${r.id}`,
+                                                                        () =>
+                                                                            fetch(`${API_BASE}/api/message-requests/reject`, {
+                                                                                method: "POST",
+                                                                                headers: authHeaders(bearerToken),
+                                                                                body: JSON.stringify({ requestId: r.id }),
+                                                                            }),
+                                                                        "Message request rejected",
+                                                                    );
+                                                                }}
+                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
+                                                            >
+                                                                Reject
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Friends</p>
+                                            <div className="space-y-1">
+                                                {friends.length === 0 && <p className="text-[10px] text-[#7F78A3]">No friends yet</p>}
+                                                {friends.map((f) => (
+                                                    <div key={f.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
+                                                        <p className="truncate text-[11px] text-[#D6D0EF]">{f.name || f.email || f.id}</p>
+                                                        <div className="mt-2 flex gap-1">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setActiveChat({ id: f.id, type: "direct" });
+                                                                    setSidebarMode(null);
+                                                                }}
+                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
+                                                            >
+                                                                Chat
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={requestActionLoading === `unfriend-${f.id}`}
+                                                                onClick={() => {
+                                                                    const bearerToken = getBearerToken();
+                                                                    if (!bearerToken) return;
+                                                                    runRequestAction(
+                                                                        `unfriend-${f.id}`,
+                                                                        () =>
+                                                                            fetch(`${API_BASE}/api/friends/unfriend`, {
+                                                                                method: "POST",
+                                                                                headers: authHeaders(bearerToken),
+                                                                                body: JSON.stringify({ userId: f.id }),
+                                                                            }),
+                                                                        "Unfriended",
+                                                                    );
+                                                                }}
+                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
+                                                            >
+                                                                Unfriend
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                         </div>
 
+                        {requestActionInfo && (
+                            <p className="mt-2 border border-emerald-900/40 bg-emerald-950/30 px-2 py-2 text-[9px] text-emerald-300">
+                                {requestActionInfo}
+                            </p>
+                        )}
+                        {requestActionError && (
+                            <p className="mt-2 border border-rose-900/50 bg-rose-950/30 px-2 py-2 text-[9px] text-rose-300">
+                                {requestActionError}
+                            </p>
+                        )}
                         {!session && !isPending && (
                             <p className="mt-3 border border-amber-900/40 bg-amber-950/30 px-2 py-2 text-[9px] text-amber-300">Sign in to load contacts.</p>
                         )}
@@ -730,6 +1104,60 @@ const DashboardPage = () => {
                                 </div>
                                 <div className="text-right text-[10px] tracking-[0.2em] text-[#7C739F] uppercase">REF.00.CHAT</div>
                             </div>
+                            {activeChat.type === "direct" && chatRestricted && activeChat.id && (
+                                <div className="border-b border-[#2B2448] bg-[#120E28] px-8 py-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="text-[11px] text-[#CFC6EF]">
+                                            Chat restricted ({relationshipStatus}). Accept requests/friendship to unlock direct messaging.
+                                        </p>
+                                        {relationshipStatus === "NONE" ? (
+                                            <button
+                                                type="button"
+                                                disabled={requestActionLoading === `chat-send-friend-${activeChat.id}`}
+                                                onClick={() => {
+                                                    const bearerToken = getBearerToken();
+                                                    if (!bearerToken) return;
+                                                    runRequestAction(
+                                                        `chat-send-friend-${activeChat.id}`,
+                                                        () =>
+                                                            fetch(`${API_BASE}/api/friend-requests/send`, {
+                                                                method: "POST",
+                                                                headers: authHeaders(bearerToken),
+                                                                body: JSON.stringify({ toUserId: activeChat.id }),
+                                                            }),
+                                                        "Friend request sent",
+                                                    );
+                                                }}
+                                                className="border border-[#554A80] bg-[#251E42] px-3 py-2 text-[10px] tracking-[0.16em] uppercase text-[#F4F0FF]"
+                                            >
+                                                Send Friend Request
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                disabled={requestActionLoading === `chat-send-msg-${activeChat.id}`}
+                                                onClick={() => {
+                                                    const bearerToken = getBearerToken();
+                                                    if (!bearerToken) return;
+                                                    runRequestAction(
+                                                        `chat-send-msg-${activeChat.id}`,
+                                                        () =>
+                                                            fetch(`${API_BASE}/api/message-requests/send`, {
+                                                                method: "POST",
+                                                                headers: authHeaders(bearerToken),
+                                                                body: JSON.stringify({ toUserId: activeChat.id }),
+                                                            }),
+                                                        "Message request sent",
+                                                    );
+                                                }}
+                                                className="border border-[#554A80] bg-[#251E42] px-3 py-2 text-[10px] tracking-[0.16em] uppercase text-[#F4F0FF]"
+                                            >
+                                                Send Message Request
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="flex flex-1 flex-col overflow-hidden">
                                 <div className="flex-1 space-y-4 overflow-y-auto px-8 py-6">
@@ -836,7 +1264,7 @@ const DashboardPage = () => {
                                             placeholder="Transmit message..."
                                         />
                                         <button
-                                            disabled={isSending}
+                                            disabled={isSending || (activeChat.type === "direct" && chatRestricted)}
                                             className="border border-[#554A80] bg-[#251E42] px-6 py-3 text-xs font-semibold tracking-[0.18em] text-[#F4F0FF] uppercase transition hover:bg-[#32275A] disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {isSending ? "Sending" : "Send"}

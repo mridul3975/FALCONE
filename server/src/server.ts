@@ -341,11 +341,13 @@ LIMIT 50
 
             // 2. Handle GET Request (Fetching History)
             if (req.method === "GET") {
-                // Only allow history fetch if they are friends
+                // Always return existing history, even when relationship is not accepted.
+                // This keeps old chats visible unless users explicitly delete them.
                 if (status !== "ACCEPTED") {
+                    const history = messageRepo.getConversation(session.user.id, otherUserId);
                     return withCors(req, new Response(JSON.stringify({
                         status: status,
-                        history: [],
+                        history,
                         restricted: true
                     }), { status: 200 }));
                 }

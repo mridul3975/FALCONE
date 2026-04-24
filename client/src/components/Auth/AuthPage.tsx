@@ -73,7 +73,7 @@ export default function AuthPage({
                                     required
                                     autoComplete="name"
                                     value={name ?? ""}
-                                    onChange={(event) => onNameChange?.(event.target.value)}
+                                    onChange={(event) => onNameChange?.((event.target as unknown as { value: string }).value)}
                                     className="w-full border border-[#3E3563] bg-[#120E29] px-4 py-3.5 text-[#E9E4FA] outline-none transition focus:border-[#6E62A3]"
                                     placeholder="Your Name"
                                 />
@@ -89,7 +89,7 @@ export default function AuthPage({
                                 type="email"
                                 autoComplete="email"
                                 value={email}
-                                onChange={(event) => onEmailChange(event.target.value)}
+                                onChange={(event) => onEmailChange((event.target as unknown as { value: string }).value)}
                                 className="w-full border border-[#3E3563] bg-[#120E29] px-4 py-3.5 text-[#E9E4FA] outline-none transition focus:border-[#6E62A3]"
                                 placeholder="name@monolith.com"
                             />
@@ -113,7 +113,7 @@ export default function AuthPage({
                                 autoComplete={loginMode ? "current-password" : "new-password"}
                                 minLength={8}
                                 value={password}
-                                onChange={(event) => onPasswordChange(event.target.value)}
+                                onChange={(event) => onPasswordChange((event.target as unknown as { value: string }).value)}
                                 className="w-full border border-[#3E3563] bg-[#120E29] px-4 py-3.5 text-[#E9E4FA] outline-none transition focus:border-[#6E62A3]"
                                 placeholder="••••••••"
                             />
