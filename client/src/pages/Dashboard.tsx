@@ -571,8 +571,21 @@ const DashboardPage = () => {
                     });
 
                     if (refreshed.ok) {
-                        const refreshedHistory = (await refreshed.json()) as ServerMessage[];
+                        const refreshedPayload = (await refreshed.json()) as
+                            | ServerMessage[]
+                            | { status: RelationshipStatus; history: ServerMessage[]; restricted: boolean };
+                        const refreshedHistory = Array.isArray(refreshedPayload)
+                            ? refreshedPayload
+                            : (refreshedPayload.history ?? []);
                         setMessages(refreshedHistory.map(mapServerMessage));
+
+                        if (!Array.isArray(refreshedPayload)) {
+                            setRelationshipStatus(refreshedPayload.status ?? "NONE");
+                            setChatRestricted(Boolean(refreshedPayload.restricted));
+                        } else {
+                            setRelationshipStatus("ACCEPTED");
+                            setChatRestricted(false);
+                        }
                     }
 
                     setUnreadDirect((prev) => ({ ...prev, [activeChat.id as string]: 0 }));
@@ -635,7 +648,10 @@ const DashboardPage = () => {
                     if (!res.ok) return [u.id, 0] as const;
 
 
-                    const history = (await res.json()) as ServerMessage[];
+                    const payload = (await res.json()) as
+                        | ServerMessage[]
+                        | { status: RelationshipStatus; history: ServerMessage[]; restricted: boolean };
+                    const history = Array.isArray(payload) ? payload : (payload.history ?? []);
                     const count = history.filter(
                         (m) => m.senderId !== currentUserId && m.status !== "read",
                     ).length;

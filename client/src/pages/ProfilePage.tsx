@@ -10,6 +10,18 @@ type UserProfile = {
     age?: number | null;
 };
 
+type SocialInfo = {
+    friendCount: number;
+    relationshipStatus: "ACCEPTED" | "PENDING" | "NONE";
+    isSelf: boolean;
+};
+
+const API_BASE =
+    (import.meta as ImportMeta & { env: { VITE_API_BASE_URL?: string } }).env.VITE_API_BASE_URL ??
+    `${(globalThis as typeof globalThis & { location?: { protocol: string; hostname: string } }).location?.protocol ?? "http:"}//${(globalThis as typeof globalThis & {
+        location?: { protocol: string; hostname: string };
+    }).location?.hostname ?? "localhost"}:3000`;
+
 const getAvatarToken = (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return "?";
@@ -28,6 +40,10 @@ export default function ProfilePage() {
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [social, setSocial] = useState<SocialInfo | null>(null);
+    const [actionLoading, setActionLoading] = useState<"friend" | "message" | null>(null);
+    const [actionError, setActionError] = useState<string | null>(null);
+    const [actionInfo, setActionInfo] = useState<string | null>(null);
 
     useEffect(() => {
         const run = async () => {
@@ -47,10 +63,16 @@ export default function ProfilePage() {
             try {
                 setLoading(true);
                 setError(null);
+                const encodedUserId = encodeURIComponent(userId);
 
-                const response = await fetch(`http://localhost:3000/api/users/${userId}`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                });
+                const [response, socialResponse] = await Promise.all([
+                    fetch(`${API_BASE}/api/users/${encodedUserId}`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    }),
+                    fetch(`${API_BASE}/api/users/${encodedUserId}/social`, {
+                        headers: { Authorization: `Bearer ${token}` },
+                    }),
+                ]);
 
                 if (!response.ok) {
                     setError("Unable to load profile.");
@@ -59,7 +81,15 @@ export default function ProfilePage() {
                 }
 
                 const data = (await response.json()) as UserProfile;
+                const socialData = socialResponse.ok
+                    ? ((await socialResponse.json()) as SocialInfo)
+                    : {
+                        friendCount: 0,
+                        relationshipStatus: "NONE" as const,
+                        isSelf: data.id === userId,
+                    };
                 setProfile(data);
+                setSocial(socialData);
             } catch {
                 setError("Unable to load profile right now.");
             } finally {
@@ -72,6 +102,46 @@ export default function ProfilePage() {
 
     const profileName = useMemo(() => profile?.name?.trim() || "Unknown User", [profile]);
     const avatarToken = useMemo(() => getAvatarToken(profileName), [profileName]);
+    const canAddFriend = Boolean(social && !social.isSelf && social.relationshipStatus === "NONE");
+    const canRequestMessage = Boolean(social && !social.isSelf && social.relationshipStatus !== "ACCEPTED");
+
+    const runAction = async (kind: "friend" | "message", endpoint: string, success: string) => {
+        if (!profile?.id) return;
+        const token = getBearerToken();
+        if (!token) {
+            setActionError("Missing bearer token. Please sign in again.");
+            return;
+        }
+        try {
+            setActionLoading(kind);
+            setActionError(null);
+            setActionInfo(null);
+            const res = await fetch(`${API_BASE}${endpoint}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ toUserId: profile.id }),
+            });
+            if (!res.ok) {
+                const msg = await res.text();
+                throw new Error(msg || "Action failed");
+            }
+            setActionInfo(success);
+            const socialResponse = await fetch(`${API_BASE}/api/users/${encodeURIComponent(profile.id)}/social`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (socialResponse.ok) {
+                const socialData = (await socialResponse.json()) as SocialInfo;
+                setSocial(socialData);
+            }
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : "Action failed");
+        } finally {
+            setActionLoading(null);
+        }
+    };
 
     return (
         <main className="relative min-h-screen overflow-hidden bg-[#03030A] text-[#D3D9EB]">
@@ -126,6 +196,57 @@ export default function ProfilePage() {
                                     <p className="mt-2 text-sm text-[#E9E4FA]">{profile.age ?? "Not provided"}</p>
                                 </div>
                             </div>
+
+                            <div className="grid gap-3 sm:grid-cols-3">
+                                <button
+                                    type="button"
+                                    disabled={!canAddFriend || actionLoading === "friend"}
+                                    onClick={() => runAction("friend", "/api/friend-requests/send", "Friend request sent")}
+                                    className="border border-[#554A80] bg-[#251E42] px-4 py-3 text-xs font-semibold tracking-[0.16em] text-[#F4F0FF] uppercase transition hover:bg-[#32275A] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {social?.relationshipStatus === "ACCEPTED"
+                                        ? "Already Friends"
+                                        : social?.relationshipStatus === "PENDING"
+                                            ? "Request Pending"
+                                            : actionLoading === "friend"
+                                                ? "Sending..."
+                                                : "Add Friend"}
+                                </button>
+
+                                <button
+                                    type="button"
+                                    disabled
+                                    className="border border-[#3A335D] bg-[#14102B] px-4 py-3 text-xs font-semibold tracking-[0.16em] text-[#D8D1F3] uppercase"
+                                >
+                                    Friends: {social?.friendCount ?? 0}
+                                </button>
+
+                                <button
+                                    type="button"
+                                    disabled={!canRequestMessage || actionLoading === "message"}
+                                    onClick={() => runAction("message", "/api/message-requests/send", "Message request sent")}
+                                    className="border border-[#554A80] bg-[#251E42] px-4 py-3 text-xs font-semibold tracking-[0.16em] text-[#F4F0FF] uppercase transition hover:bg-[#32275A] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    {social?.isSelf
+                                        ? "This Is You"
+                                        : social?.relationshipStatus === "ACCEPTED"
+                                            ? "Open Chat From Dashboard"
+                                            : actionLoading === "message"
+                                                ? "Sending..."
+                                                : "Message"}
+                                </button>
+                            </div>
+
+                            {actionInfo && (
+                                <p className="border border-emerald-900/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-300">
+                                    {actionInfo}
+                                </p>
+                            )}
+                            {actionError && (
+                                <p className="border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-sm text-rose-300">
+                                    {actionError}
+                                </p>
+                            )}
                         </div>
                     ) : null}
                 </div>

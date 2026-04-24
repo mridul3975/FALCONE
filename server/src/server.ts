@@ -293,6 +293,53 @@ LIMIT 50
             );
         }
 
+        if (url.pathname.match(/^\/api\/users\/([^/]+)\/social$/) && req.method === "GET") {
+            const session = await auth.api.getSession({
+                headers: req.headers,
+            });
+            if (!session) {
+                return withCors(req, new Response("Unauthorized", { status: 401 }));
+            }
+
+            const userId = decodeURIComponent(url.pathname.split("/").filter(Boolean)[2] ?? "").trim();
+            if (!userId) {
+                return withCors(req, new Response("Bad Request: Missing user ID", { status: 400 }));
+            }
+
+            const target = db
+                .query("SELECT id FROM user WHERE id = ? LIMIT 1")
+                .get(userId) as { id: string } | null;
+            if (!target) {
+                return withCors(req, new Response("Not Found", { status: 404 }));
+            }
+
+            const friendCountRow = db
+                .query(
+                    `
+                    SELECT COUNT(*) AS friendCount
+                    FROM friendships
+                    WHERE user_a_id = ? OR user_b_id = ?
+                    `,
+                )
+                .get(userId, userId) as { friendCount: number | string };
+            const friendCount = Number(friendCountRow?.friendCount ?? 0);
+
+            const relationshipStatus =
+                userId === session.user.id ? "ACCEPTED" : getRelationshipStatus(db, session.user.id, userId);
+
+            return withCors(
+                req,
+                new Response(
+                    JSON.stringify({
+                        friendCount,
+                        relationshipStatus,
+                        isSelf: userId === session.user.id,
+                    }),
+                    { headers: { "Content-Type": "application/json" } },
+                ),
+            );
+        }
+
         if (url.pathname === "/api/messages/mark-read" && req.method === "POST") {
             const session = await auth.api.getSession({ headers: req.headers });
             if (!session) {
@@ -1080,6 +1127,9 @@ if (!allowsRequests) {
             return withCors(req, new Response(JSON.stringify(blockedUser), {
                 headers: { "Content-Type": "application/json" },
             }));
+        }
+        if (url.pathname.startsWith("/api/")) {
+            return withCors(req, new Response("Not Found", { status: 404 }));
         }
         return new Response("Not Found", { status: 404 });
     },
