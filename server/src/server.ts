@@ -1442,6 +1442,16 @@ if (!allowsRequests) {
             return withCors(req, new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }));
         }
 
+        if (url.pathname === "/api/rooms/all" && req.method === "GET") {
+            const session = await auth.api.getSession({ headers: req.headers });
+            if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));
+
+            const rooms = db.query(`SELECT id, name, creatorId, createdAt FROM rooms`).all();
+            return withCors(req, new Response(JSON.stringify(rooms), {
+                headers: { "Content-Type": "application/json" }
+            }));
+        }
+
         if (url.pathname === "/api/search" && req.method === "GET") {
             const session = await auth.api.getSession({ headers: req.headers });
             if (!session) return withCors(req, new Response("Unauthorized", { status: 401 }));

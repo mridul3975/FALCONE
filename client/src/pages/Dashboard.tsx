@@ -284,6 +284,7 @@ const DashboardPage = () => {
     const [messageSearchResults, setMessageSearchResults] = useState<{ private: any[], rooms: any[], discoveredRooms?: any[] } | null>(null);
     const [isSearchingMessages, setIsSearchingMessages] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
+    const [searchTab, setSearchTab] = useState<"messages" | "users" | "rooms">("messages");
     const sortedFilteredUsers = data.users.filter(u => {
         const nameMatch = u.name?.toLowerCase().includes(searchQuery.toLowerCase());
         const emailMatch = u.email?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -1163,7 +1164,7 @@ const DashboardPage = () => {
 
             <div className="relative flex h-full w-full">
                 {/* Icon Rail */}
-                <aside className="flex w-24 shrink-0 flex-col items-center border-r border-[#24203B] bg-[rgba(2,2,10,0.9)] px-3 py-6">
+                <aside className="flex w-24 shrink-0 flex-col items-center border-r border-[#24203B] bg-[rgba(2,2,10,0.9)] px-3 py-6 overflow-y-auto">
                     <button type="button" className="mb-8 inline-flex h-10 w-10 items-center justify-center border border-[#3A3458] bg-[#0C0A1C] text-[#C3BDE0]">
                         ☁
                     </button>
@@ -1252,9 +1253,27 @@ const DashboardPage = () => {
                         }`}
                 >
                     <div className="flex h-full flex-col p-4">
-                        <h3 className="mb-4 text-[11px] font-semibold tracking-[0.2em] text-[#D9D2F1] uppercase">
-                            {sidebarMode === "direct" ? "Direct Contacts" : sidebarMode === "room" ? "My Rooms" : sidebarMode === "room_discover" ? "Discover Rooms" : sidebarMode === "message_search" ? "Search Messages" : "Requests & Friends"}
-                        </h3>
+                        <div className="mb-6">
+                            <h3 className="mb-4 text-[11px] font-semibold tracking-[0.2em] text-[#D9D2F1] uppercase">
+                                {sidebarMode === "direct" ? "Messages" : sidebarMode === "room" ? "Rooms" : "Dashboard"}
+                            </h3>
+                            
+                            {/* Integrated Search Bar at the Top */}
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={messageSearchQuery}
+                                    onChange={(e) => {
+                                        setMessageSearchQuery(e.target.value);
+                                        setSearchQuery(e.target.value); // Sync both
+                                    }}
+                                    placeholder={sidebarMode === "direct" ? "Search users..." : "Search rooms..."}
+                                    className="w-full border border-[#2B2450] bg-[#0F0C21] px-2.5 py-2 text-[10px] text-[#D9D2F1] outline-none focus:border-[#6C619A] transition"
+                                />
+                                <span className="absolute right-2 top-2.5 text-[10px] text-[#4A4273]">⌕</span>
+                            </div>
+                        </div>
+
                         <div className="flex-1 space-y-1.5 overflow-y-auto">
                             {sidebarMode === "room" && (
                                 <button
@@ -1304,90 +1323,156 @@ const DashboardPage = () => {
                                 </div>
                             )}
 
-                            {(sidebarMode === "room" || sidebarMode === "room_discover") && (
-                                <div className="mb-4 relative">
-                                    <input
-                                        type="text"
-                                        value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
-                                        placeholder="Filter rooms..."
-                                        className="w-full border border-[#2B2450] bg-[#0F0C21] px-2.5 py-2 text-xs text-[#D9D2F1] outline-none focus:border-[#6C619A]"
-                                    />
-                                </div>
-                            )}
+
 
                             {sidebarMode === "message_search" && (
-                                <div className="mb-4 space-y-3">
-                                    <form onSubmit={handleMessageSearch} className="relative">
-                                        <input
-                                            type="text"
-                                            value={messageSearchQuery}
-                                            onChange={(e) => setMessageSearchQuery(e.target.value)}
-                                            placeholder="Search messages..."
-                                            className="w-full border border-[#2B2450] bg-[#0F0C21] px-2.5 py-2 text-xs text-[#D9D2F1] outline-none focus:border-[#6C619A]"
-                                        />
-                                        {isSearchingMessages && <div className="absolute right-2 top-2 h-4 w-4 animate-spin border-2 border-emerald-500 border-t-transparent rounded-full" />}
-                                    </form>
-
-                                    {messageSearchResults && (
-                                        <div className="space-y-4">
-                                            {messageSearchResults.private.length > 0 && (
-                                                <div className="space-y-1.5">
-                                                    <p className="text-[9px] font-bold text-[#8D83B2] uppercase">Private</p>
-                                                    {messageSearchResults.private.map((m: any) => (
-                                                        <button
-                                                            key={m.id}
-                                                            onClick={() => setActiveChat({ id: m.senderId === session?.user.id ? m.receiverId : m.senderId, type: "direct" })}
-                                                            className="w-full rounded border border-[#2B2450] bg-[#0F0C21] p-2 text-left hover:border-[#4A4273]"
-                                                        >
-                                                            <p className="truncate text-[10px] font-bold text-[#D6D0EF]">{m.sender_name}</p>
-                                                            <p className="mt-0.5 line-clamp-2 text-[9px] text-[#8D83B2]">{m.content}</p>
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {messageSearchResults.rooms.length > 0 && (
-                                                <div className="space-y-1.5">
-                                                    <p className="text-[9px] font-bold text-[#8D83B2] uppercase">Rooms (Messages)</p>
-                                                    {messageSearchResults.rooms.map((m: any) => (
-                                                        <button
-                                                            key={m.id}
-                                                            onClick={() => setActiveChat({ id: m.roomId, type: "room" })}
-                                                            className="w-full rounded border border-[#2B2450] bg-[#0F0C21] p-2 text-left hover:border-[#4A4273]"
-                                                        >
-                                                            <p className="truncate text-[10px] font-bold text-[#D6D0EF]">{m.room_name} · {m.sender_name}</p>
-                                                            <p className="mt-0.5 line-clamp-2 text-[9px] text-[#8D83B2]">{m.content}</p>
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {(messageSearchResults as any).discoveredRooms?.length > 0 && (
-                                                <div className="space-y-1.5">
-                                                    <p className="text-[9px] font-bold text-[#8D83B2] uppercase">Discover Rooms</p>
-                                                    {(messageSearchResults as any).discoveredRooms.map((r: any) => (
-                                                        <div
-                                                            key={r.id}
-                                                            className="flex items-center justify-between rounded border border-[#2B2450] bg-[#0F0C21] p-2 hover:border-[#4A4273]"
-                                                        >
-                                                            <div className="min-w-0 flex-1">
-                                                                <p className="truncate text-[10px] font-bold text-[#D6D0EF]"># {r.name}</p>
-                                                                <p className="text-[8px] text-[#6E62A3] uppercase">Global Room</p>
-                                                            </div>
-                                                            <button
-                                                                onClick={() => handleRequestJoinRoom(r.id)}
-                                                                className="ml-2 rounded bg-[#2A2248] px-2 py-1 text-[8px] font-bold text-[#F1EDFF] transition hover:bg-[#3A335D]"
-                                                            >
-                                                                REQUEST
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {messageSearchResults.private.length === 0 && messageSearchResults.rooms.length === 0 && !(messageSearchResults as any).discoveredRooms?.length && (
-                                                <p className="text-center text-[10px] text-[#8D83B2]">No results found.</p>
-                                            )}
+                                <div className="mb-4 space-y-4">
+                                    <div className="flex border-b border-[#2B2450] mb-2">
+                                        {["messages", "users", "rooms"].map((tab) => (
+                                            <button
+                                                key={tab}
+                                                onClick={() => {
+                                                    setSearchTab(tab as any);
+                                                    if (tab === "rooms" && allRooms.length === 0) {
+                                                        const bearerToken = getBearerToken();
+                                                        if (bearerToken) {
+                                                            fetch(`${API_BASE}/api/rooms/all`, {
+                                                                headers: { Authorization: `Bearer ${bearerToken}` }
+                                                            }).then(res => res.json()).then(setAllRooms);
+                                                        }
+                                                    }
+                                                }}
+                                                className={`flex-1 pb-2 text-[10px] font-bold uppercase tracking-widest transition ${searchTab === tab ? "text-[#F1EDFF] border-b-2 border-[#6C619A]" : "text-[#6E62A3] hover:text-[#D9D2F1]"}`}
+                                            >
+                                                {tab}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    {isSearchingMessages && (
+                                        <div className="flex items-center gap-2 text-[9px] text-emerald-400">
+                                            <div className="h-2 w-2 animate-spin rounded-full border border-emerald-400 border-t-transparent" />
+                                            Searching...
                                         </div>
                                     )}
+
+                                    <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+                                        {searchTab === "messages" && (
+                                            <div className="space-y-4">
+                                                {messageSearchResults ? (
+                                                    <div className="space-y-4">
+                                                        {messageSearchResults.private.length > 0 && (
+                                                            <div className="space-y-1.5">
+                                                                <p className="text-[9px] font-bold text-[#8D83B2] uppercase">Direct Messages</p>
+                                                                {messageSearchResults.private.map((m: any) => (
+                                                                    <button
+                                                                        key={m.id}
+                                                                        onClick={() => setActiveChat({ id: m.senderId === session?.user.id ? m.receiverId : m.senderId, type: "direct" })}
+                                                                        className="w-full rounded border border-[#2B2450] bg-[#0F0C21] p-2 text-left hover:border-[#4A4273]"
+                                                                    >
+                                                                        <p className="truncate text-[10px] font-bold text-[#D6D0EF]">{m.sender_name}</p>
+                                                                        <p className="mt-0.5 truncate text-[10px] text-[#8D83B2]">{m.text || m.content}</p>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        {messageSearchResults.rooms.length > 0 && (
+                                                            <div className="space-y-1.5">
+                                                                <p className="text-[9px] font-bold text-[#8D83B2] uppercase">Room Messages</p>
+                                                                {messageSearchResults.rooms.map((m: any) => (
+                                                                    <button
+                                                                        key={m.id}
+                                                                        onClick={() => setActiveChat({ id: m.roomId, type: "room" })}
+                                                                        className="w-full rounded border border-[#2B2450] bg-[#0F0C21] p-2 text-left hover:border-[#4A4273]"
+                                                                    >
+                                                                        <div className="flex justify-between">
+                                                                            <p className="truncate text-[10px] font-bold text-[#D6D0EF]"># {m.room_name}</p>
+                                                                            <p className="text-[8px] text-[#6E62A3]">{m.sender_name}</p>
+                                                                        </div>
+                                                                        <p className="mt-0.5 truncate text-[10px] text-[#8D83B2]">{m.text || m.content}</p>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        {messageSearchResults.private.length === 0 && messageSearchResults.rooms.length === 0 && (
+                                                            <p className="text-center text-[10px] text-[#8D83B2]">No message results found.</p>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-center text-[10px] text-[#6E62A3]">Search for keywords in messages.</p>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {searchTab === "users" && (
+                                            <div className="space-y-1.5">
+                                                <p className="text-[9px] font-bold text-[#8D83B2] uppercase">All Users</p>
+                                                {data.users
+                                                    .filter(u => u.name?.toLowerCase().includes(messageSearchQuery.toLowerCase()) || u.email?.toLowerCase().includes(messageSearchQuery.toLowerCase()))
+                                                    .map(u => (
+                                                        <button
+                                                            key={u.id}
+                                                            onClick={() => setActiveChat({ id: u.id, type: "direct" })}
+                                                            className="flex w-full items-center gap-2 rounded border border-[#2B2450] bg-[#0F0C21] p-2 text-left hover:border-[#4A4273]"
+                                                        >
+                                                            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#2A2248] text-[8px] font-bold text-[#F1EDFF]">
+                                                                {getAvatarToken(u.name)}
+                                                            </div>
+                                                            <div className="min-w-0 flex-1">
+                                                                <p className="truncate text-[10px] font-bold text-[#D6D0EF]">{u.name || u.email}</p>
+                                                                <p className="text-[8px] text-[#6E62A3] uppercase">{onlineUsers.has(u.id) ? "Online" : "Offline"}</p>
+                                                            </div>
+                                                        </button>
+                                                    ))}
+                                            </div>
+                                        )}
+
+                                        {searchTab === "rooms" && (
+                                            <div className="space-y-6">
+                                                {/* My Rooms */}
+                                                <div className="space-y-1.5">
+                                                    <p className="text-[9px] font-bold text-[#8D83B2] uppercase">My Rooms</p>
+                                                    {data.rooms
+                                                        .filter(r => r.name.toLowerCase().includes(messageSearchQuery.toLowerCase()))
+                                                        .map(r => (
+                                                            <button
+                                                                key={r.id}
+                                                                onClick={() => setActiveChat({ id: r.id, type: "room" })}
+                                                                className="flex w-full items-center gap-2 rounded border border-[#2B2450] bg-[#0F0C21] p-2 text-left hover:border-[#4A4273]"
+                                                            >
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="truncate text-[10px] font-bold text-[#D6D0EF]"># {r.name}</p>
+                                                                </div>
+                                                            </button>
+                                                        ))}
+                                                </div>
+
+                                                {/* Global Rooms Discovery */}
+                                                <div className="space-y-1.5 pt-4 border-t border-[#2B2450]">
+                                                    <p className="text-[9px] font-bold text-[#8D83B2] uppercase">Discover All Rooms</p>
+                                                    {allRooms
+                                                        .filter(r => !data.rooms.some(myR => myR.id === r.id))
+                                                        .filter(r => r.name.toLowerCase().includes(messageSearchQuery.toLowerCase()))
+                                                        .map(r => (
+                                                            <div key={r.id} className="flex items-center justify-between rounded border border-[#2B2450] bg-[#0F0C21] p-2">
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className="truncate text-[10px] font-bold text-[#D6D0EF]"># {r.name}</p>
+                                                                    <p className="text-[8px] text-[#6E62A3] uppercase">Global Room</p>
+                                                                </div>
+                                                                <button
+                                                                    onClick={() => handleRequestJoinRoom(r.id)}
+                                                                    className="ml-2 rounded bg-[#2A2248] px-2 py-1 text-[8px] font-bold text-[#F1EDFF] transition hover:bg-[#3A335D]"
+                                                                >
+                                                                    JOIN
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    {allRooms.filter(r => !data.rooms.some(myR => myR.id === r.id)).length === 0 && (
+                                                        <p className="text-center text-[9px] text-[#6E62A3]">No new rooms found.</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
