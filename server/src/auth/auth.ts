@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import db from "../db/connection";
 import { bearer } from "better-auth/plugins/bearer";
 import { networkInterfaces } from "node:os";
+import { google } from "better-auth/social-providers";
 
 
 
@@ -41,7 +42,14 @@ export const auth = betterAuth({
     emailAndPassword: {
         enabled: true,
     },
+    socialProviders: {
+        google: {
+            clientId: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        },
+    },
     plugins: [bearer()],
     trustedOrigins,
 });
+
 

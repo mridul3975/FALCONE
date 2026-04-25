@@ -60,6 +60,7 @@ export default function SignupPage() {
             onEmailChange={setEmail}
             onPasswordChange={setPassword}
             onSubmit={handleSubmit}
+            onGoogleSignIn={auth.signInWithGoogle}
         />
     );
 }

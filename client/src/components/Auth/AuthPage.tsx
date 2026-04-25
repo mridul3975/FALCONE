@@ -14,6 +14,7 @@ type AuthPageProps = {
     onEmailChange: (value: string) => void;
     onPasswordChange: (value: string) => void;
     onSubmit: FormEventHandler<HTMLFormElement>;
+    onGoogleSignIn?: () => void;
 };
 
 const isLogin = (mode: AuthMode) => mode === "login";
@@ -29,6 +30,7 @@ export default function AuthPage({
     onEmailChange,
     onPasswordChange,
     onSubmit,
+    onGoogleSignIn,
 }: AuthPageProps) {
     const loginMode = isLogin(mode);
 
@@ -147,7 +149,8 @@ export default function AuthPage({
                     <div className="grid grid-cols-2 gap-3">
                         <button
                             type="button"
-                            className="border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm font-semibold tracking-[0.08em] text-[#E4EAF7] uppercase"
+                            onClick={onGoogleSignIn}
+                            className="border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm font-semibold tracking-[0.08em] text-[#E4EAF7] uppercase hover:bg-[#1A1538] transition"
                         >
                             Google
                         </button>

@@ -45,6 +45,7 @@ export default function LoginPage() {
             onEmailChange={setEmail}
             onPasswordChange={setPassword}
             onSubmit={handleSubmit}
+            onGoogleSignIn={auth.signInWithGoogle}
         />
     );
 }

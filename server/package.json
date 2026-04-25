@@ -15,7 +15,9 @@
     "@google/generative-ai": "^0.24.1",
     "better-auth": "^1.6.2",
     "bun.lock": "^0.0.0",
-    "jsonwebtoken": "^9.0.3"
+    "jsonwebtoken": "^9.0.3",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0"
   },
   "scripts": {
     "dev": "bun --watch src/server.ts",
