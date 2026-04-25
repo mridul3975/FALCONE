@@ -285,6 +285,7 @@ const DashboardPage = () => {
     const [isSearchingMessages, setIsSearchingMessages] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const [searchTab, setSearchTab] = useState<"messages" | "users" | "rooms">("messages");
+    const [showNotifications, setShowNotifications] = useState(false);
     const sortedFilteredUsers = data.users.filter(u => {
         const nameMatch = u.name?.toLowerCase().includes(searchQuery.toLowerCase());
         const emailMatch = u.email?.toLowerCase().includes(searchQuery.toLowerCase());
@@ -1207,14 +1208,19 @@ const DashboardPage = () => {
 
                     <button
                         type="button"
-                        onClick={() => setSidebarMode(sidebarMode === "requests" ? null : "requests")}
-                        className={`mb-4 flex w-full flex-col items-center gap-1 border px-2 py-2 text-[9px] tracking-[0.2em] uppercase transition ${sidebarMode === "requests"
+                        onClick={() => setShowNotifications(!showNotifications)}
+                        className={`mb-4 flex w-full flex-col items-center gap-1 border px-2 py-2 text-[9px] tracking-[0.2em] uppercase transition ${showNotifications
                             ? "border-[#6C619A] bg-[#15122A] text-[#E6E3F5]"
                             : "border-transparent text-[#7F78A3] hover:border-[#3A335A] hover:bg-[#0F0C21]"
                             }`}
                     >
-                        <span className="text-sm">◇</span>
-                        Requests
+                        <div className="relative">
+                            <span className="text-sm">🔔</span>
+                            {(friendRequestsIncoming.length + roomJoinRequests.length + roomInvites.length) > 0 && (
+                                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-rose-500 shadow-[0_0_5px_rgba(244,63,94,0.6)]" />
+                            )}
+                        </div>
+                        Alerts
                     </button>
 
                     <button
@@ -1249,32 +1255,32 @@ const DashboardPage = () => {
 
                 {/* Sliding Contacts Drawer */}
                 <div
-                    className={`border-r border-[#24203B] bg-[rgba(8,6,20,0.85)] transition-all duration-300 overflow-hidden ${sidebarMode ? "w-56" : "w-0"
+                    className={`border-r border-[#24203B] bg-[rgba(8,6,20,0.92)] backdrop-blur-xl transition-all duration-300 overflow-hidden ${sidebarMode ? "w-80" : "w-0"
                         }`}
                 >
-                    <div className="flex h-full flex-col p-4">
-                        <div className="mb-6">
-                            <h3 className="mb-4 text-[11px] font-semibold tracking-[0.2em] text-[#D9D2F1] uppercase">
-                                {sidebarMode === "direct" ? "Messages" : sidebarMode === "room" ? "Rooms" : "Dashboard"}
+                    <div className="flex h-full flex-col p-6">
+                        <div className="mb-8">
+                            <h3 className="mb-4 text-[12px] font-bold tracking-[0.25em] text-[#A79FC8] uppercase">
+                                {sidebarMode === "direct" ? "Messages" : sidebarMode === "room" ? "Channels" : "Nav"}
                             </h3>
-                            
+
                             {/* Integrated Search Bar at the Top */}
-                            <div className="relative">
+                            <div className="group relative">
                                 <input
                                     type="text"
                                     value={messageSearchQuery}
                                     onChange={(e) => {
                                         setMessageSearchQuery(e.target.value);
-                                        setSearchQuery(e.target.value); // Sync both
+                                        setSearchQuery(e.target.value);
                                     }}
-                                    placeholder={sidebarMode === "direct" ? "Search users..." : "Search rooms..."}
-                                    className="w-full border border-[#2B2450] bg-[#0F0C21] px-2.5 py-2 text-[10px] text-[#D9D2F1] outline-none focus:border-[#6C619A] transition"
+                                    placeholder={sidebarMode === "direct" ? "Find a contact..." : sidebarMode === "room" ? "Find a room..." : "Search everything..."}
+                                    className="w-full rounded-lg border border-[#2B2450] bg-[#0A081A] py-2.5 pl-9 pr-3 text-[11px] text-[#F1EDFF] placeholder-[#4A4273] outline-none ring-1 ring-transparent transition-all focus:border-[#6C619A] focus:ring-[#6C619A]/30"
                                 />
-                                <span className="absolute right-2 top-2.5 text-[10px] text-[#4A4273]">⌕</span>
+                                <span className="absolute left-3 top-2.5 text-sm text-[#4A4273] transition-colors group-focus-within:text-[#6C619A]">⌕</span>
                             </div>
                         </div>
 
-                        <div className="flex-1 space-y-1.5 overflow-y-auto">
+                        <div className="flex-1 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
                             {sidebarMode === "room" && (
                                 <button
                                     onClick={async () => {
@@ -1534,766 +1540,611 @@ const DashboardPage = () => {
                                             </span>
                                         )}
                                     </button>
-                                )) : (
-                                    <div className="space-y-4">
-                                        <div>
-                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Incoming Friend Requests</p>
-                                            <div className="space-y-1">
-                                                {friendRequestsIncoming.length === 0 && (
-                                                    <p className="text-[10px] text-[#7F78A3]">No pending requests</p>
-                                                )}
-                                                {friendRequestsIncoming.map((r) => (
-                                                    <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF] font-semibold">{r.from_user_name || r.from_user_id}</p>
-                                                        <p className="text-[9px] text-[#8D83B2] mb-2">Incoming Friend Request</p>
-                                                        <div className="mt-2 flex gap-1">
-                                                            <button
-                                                                type="button"
-                                                                disabled={requestActionLoading === `f-accept-${r.id}`}
-                                                                onClick={() => {
-                                                                    const bearerToken = getBearerToken();
-                                                                    if (!bearerToken) return;
-                                                                    runRequestAction(
-                                                                        `f-accept-${r.id}`,
-                                                                        () =>
-                                                                            fetch(`${API_BASE}/api/friend-requests/accept`, {
-                                                                                method: "POST",
-                                                                                headers: authHeaders(bearerToken),
-                                                                                body: JSON.stringify({ requestId: r.id }),
-                                                                            }),
-                                                                        "Friend request accepted",
-                                                                    );
-                                                                }}
-                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
-                                                            >
-                                                                Accept
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                disabled={requestActionLoading === `f-reject-${r.id}`}
-                                                                onClick={() => {
-                                                                    const bearerToken = getBearerToken();
-                                                                    if (!bearerToken) return;
-                                                                    runRequestAction(
-                                                                        `f-reject-${r.id}`,
-                                                                        () =>
-                                                                            fetch(`${API_BASE}/api/friend-requests/reject`, {
-                                                                                method: "POST",
-                                                                                headers: authHeaders(bearerToken),
-                                                                                body: JSON.stringify({ requestId: r.id }),
-                                                                            }),
-                                                                        "Friend request rejected",
-                                                                    );
-                                                                }}
-                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
-                                                            >
-                                                                Reject
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
+                                )) : null}
+                        </div>
+                    </div>
+                </div>
 
-                                        <div>
-                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Outgoing Friend Requests</p>
-                                            <div className="space-y-1">
-                                                {friendRequestsOutgoing.length === 0 && (
-                                                    <p className="text-[10px] text-[#7F78A3]">No outgoing requests</p>
-                                                )}
-                                                {friendRequestsOutgoing.map((r) => (
-                                                    <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF] font-semibold">{r.to_user_name || r.to_user_id}</p>
-                                                        <p className="text-[9px] text-[#8D83B2]">Outgoing Friend Request</p>
+                {/* Main Chat Area */}
+                <div className="relative flex flex-1 flex-col overflow-hidden">
+
+                    <main className="relative flex-1 overflow-hidden border-l border-[#1D1734] bg-[linear-gradient(145deg,rgba(35,16,66,0.7)_0%,rgba(9,7,30,0.96)_45%,rgba(6,5,20,1)_100%)]">
+                        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_100%_at_20%_10%,rgba(163,140,223,0.18)_0%,rgba(24,18,48,0)_52%)]" />
+
+                        {activeChat.id ? (
+                            <div className="relative flex h-full flex-col">
+                                <div className="flex items-start justify-between border-b border-[#272043] px-8 py-6">
+                                    <div>
+                                        <p className="text-[10px] tracking-[0.28em] text-[#8D83B2] uppercase">Active Thread</p>
+                                        <div className="flex items-center gap-3">
+                                            <h2 className="mt-2 text-4xl font-semibold tracking-[0.04em] text-[#F1EDFF]">
+                                                {activeChat.type === "direct"
+                                                    ? (data.users.find(u => u.id === activeChat.id)?.name || activeChat.id)
+                                                    : activeChat.id
+                                                }
+                                            </h2>
+                                            {activeChat.type === "direct" && onlineUsers.has(activeChat.id) && (
+                                                <div className="mt-3 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 border border-emerald-500/20">
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                                    <span className="text-[10px] font-bold tracking-wider text-emerald-400 uppercase">Online</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <p className="mt-1 text-[11px] tracking-[0.2em] text-[#A79FC8] uppercase">{activeChat.type}</p>
+                                            {activeChat.type === "direct" && typingStatus[activeChat.id] && (
+                                                <span className="mt-1 text-[11px] italic text-emerald-400 animate-pulse">is typing...</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            type="button"
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#6F62A3] hover:text-[#D6D0EF]"
+                                            title="Audio Call"
+                                        >
+                                            📞
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#6F62A3] hover:text-[#D6D0EF]"
+                                            title="Video Call"
+                                        >
+                                            📹
+                                        </button>
+                                        <button
+                                            onClick={() => setShowNotifications(!showNotifications)}
+                                            className="group relative inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1534] transition hover:border-[#6C619A] hover:bg-[#251E4A]"
+                                            title="Notifications"
+                                        >
+                                            <span className="text-sm">🔔</span>
+                                            {(friendRequestsIncoming.length + roomJoinRequests.length + roomInvites.length) > 0 && (
+                                                <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[8px] font-bold text-white shadow-lg">
+                                                    {friendRequestsIncoming.length + roomJoinRequests.length + roomInvites.length}
+                                                </span>
+                                            )}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveChat({ id: null, type: null })}
+                                            className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#D95A6F] hover:text-[#D95A6F]"
+                                            title="Close Chat"
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+                                </div>
+                                {activeChat.id && activeChat.type === "room" && (
+                                    (() => {
+                                        const room = data.rooms.find(r => r.id === activeChat.id);
+                                        const isCreator = room?.creatorId === currentUserId;
+                                        // We'd need to know if we are a member. 
+                                        // Let's check messages array or a specific membership state.
+                                        // Simplest for now: if we failed to load messages, we are restricted.
+                                        if (error === "Forbidden: Not a room member") {
+                                            return (
+                                                <div className="border-b border-[#3A335D]/50 bg-[#14102B]/60 px-8 py-4 backdrop-blur-md">
+                                                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2A2248] text-[#9C93BE]">🔒</div>
+                                                            <div>
+                                                                <p className="text-xs font-semibold tracking-wide text-[#F1EDFF]">Private Room</p>
+                                                                <p className="text-[10px] text-[#8D83B2]">You must be a member to view this room.</p>
+                                                            </div>
+                                                        </div>
                                                         <button
-                                                            type="button"
-                                                            disabled={requestActionLoading === `f-cancel-${r.id}`}
-                                                            onClick={() => {
-                                                                const bearerToken = getBearerToken();
-                                                                if (!bearerToken) return;
-                                                                runRequestAction(
-                                                                    `f-cancel-${r.id}`,
-                                                                    () =>
-                                                                        fetch(`${API_BASE}/api/friend-requests/cancel`, {
-                                                                            method: "POST",
-                                                                            headers: authHeaders(bearerToken),
-                                                                            body: JSON.stringify({ requestId: r.id }),
-                                                                        }),
-                                                                    "Friend request cancelled",
-                                                                );
-                                                            }}
-                                                            className="mt-2 border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
+                                                            onClick={() => handleRequestJoinRoom(activeChat.id!)}
+                                                            className="rounded border border-[#6E62A3] bg-[#2A2248] px-4 py-2 text-[10px] font-bold tracking-[0.12em] text-[#F1EDFF] uppercase transition hover:border-[#F1EDFF]"
                                                         >
-                                                            Cancel
+                                                            Request to Join
                                                         </button>
                                                     </div>
-                                                ))}
+                                                </div>
+                                            );
+                                        }
+                                        if (isCreator) {
+                                            // Optionally show button to view requests
+                                            return (
+                                                <div className="border-b border-[#3A335D]/50 bg-[#14102B]/30 px-8 py-2">
+                                                    <button
+                                                        onClick={async () => {
+                                                            const res = await fetch(`${API_BASE}/api/rooms/${activeChat.id}/join-requests`, {
+                                                                headers: { Authorization: `Bearer ${getBearerToken()}` }
+                                                            });
+                                                            if (res.ok) setRoomJoinRequests(await res.json());
+                                                        }}
+                                                        className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest hover:text-emerald-300"
+                                                    >
+                                                        Manage Join Requests ({roomJoinRequests.filter(r => r.roomId === activeChat.id).length})
+                                                    </button>
+                                                    {roomJoinRequests.filter(r => r.roomId === activeChat.id).map(req => (
+                                                        <div key={req.id} className="mt-2 flex items-center justify-between bg-black/20 p-2 rounded">
+                                                            <span className="text-[10px] text-[#D6D0EF]">{req.user_name} wants to join</span>
+                                                            <div className="flex gap-2">
+                                                                <button onClick={() => handleRespondJoinRoom(req.id, 'accept')} className="text-[9px] text-emerald-400 font-bold">ACCEPT</button>
+                                                                <button onClick={() => handleRespondJoinRoom(req.id, 'reject')} className="text-[9px] text-rose-400 font-bold">REJECT</button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            );
+                                        }
+                                        return null;
+                                    })()
+                                )}
+                                {activeChat.type === "direct" && chatRestricted && activeChat.id && (
+                                    <div className="border-b border-[#3A335D]/50 bg-[#14102B]/60 px-8 py-4 backdrop-blur-md">
+                                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2A2248] text-[#9C93BE]">
+                                                    {relationshipStatus === "PENDING" ? "⏳" : "🔒"}
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs font-semibold tracking-wide text-[#F1EDFF]">
+                                                        {relationshipStatus === "PENDING" ? "Request Pending" : "Message Request Required"}
+                                                    </p>
+                                                    <p className="text-[10px] text-[#8D83B2]">
+                                                        {relationshipStatus === "PENDING"
+                                                            ? "Waiting for the recipient to accept your chat request."
+                                                            : "You need to send a request to start chatting with this user."}
+                                                    </p>
+                                                </div>
                                             </div>
-                                        </div>
 
-                                        <div>
-                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Incoming Message Requests</p>
-                                            <div className="space-y-1">
-                                                {messageRequestsIncoming.length === 0 && (
-                                                    <p className="text-[10px] text-[#7F78A3]">No pending requests</p>
-                                                )}
-                                                {messageRequestsIncoming.map((r) => (
-                                                    <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF] font-semibold">{r.from_user_name || r.from_user_id}</p>
-                                                        <p className="text-[9px] text-[#8D83B2]">Incoming Message Request</p>
-                                                        <div className="mt-2 flex gap-1">
-                                                            <button
-                                                                type="button"
-                                                                disabled={requestActionLoading === `m-accept-${r.id}`}
-                                                                onClick={() => {
-                                                                    const bearerToken = getBearerToken();
-                                                                    if (!bearerToken) return;
-                                                                    runRequestAction(
-                                                                        `m-accept-${r.id}`,
-                                                                        () =>
-                                                                            fetch(`${API_BASE}/api/message-requests/accept`, {
-                                                                                method: "POST",
-                                                                                headers: authHeaders(bearerToken),
-                                                                                body: JSON.stringify({ requestId: r.id }),
-                                                                            }),
-                                                                        "Message request accepted",
-                                                                    );
-                                                                }}
-                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
-                                                            >
-                                                                Accept
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                disabled={requestActionLoading === `m-reject-${r.id}`}
-                                                                onClick={() => {
-                                                                    const bearerToken = getBearerToken();
-                                                                    if (!bearerToken) return;
-                                                                    runRequestAction(
-                                                                        `m-reject-${r.id}`,
-                                                                        () =>
-                                                                            fetch(`${API_BASE}/api/message-requests/reject`, {
-                                                                                method: "POST",
-                                                                                headers: authHeaders(bearerToken),
-                                                                                body: JSON.stringify({ requestId: r.id }),
-                                                                            }),
-                                                                        "Message request rejected",
-                                                                    );
-                                                                }}
-                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
-                                                            >
-                                                                Reject
-                                                            </button>
+                                            {relationshipStatus === "NONE" && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        // focus the input to prompt sending a message as request
+                                                        const input = document.querySelector('input[name="msg"]') as HTMLInputElement;
+                                                        input?.focus();
+                                                    }}
+                                                    className="group relative overflow-hidden rounded border border-[#6E62A3] bg-[#2A2248] px-4 py-2 text-[10px] font-bold tracking-[0.12em] text-[#F1EDFF] uppercase transition hover:border-[#F1EDFF]"
+                                                >
+                                                    <span className="relative z-10">Send Request via Message</span>
+                                                    <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/5 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="flex flex-1 flex-col overflow-hidden">
+                                    <div className="flex-1 space-y-4 overflow-y-auto px-8 py-6">
+                                        {messages.length > 0 ? (
+                                            messages.map((msg: MessageItem) => {
+                                                const isGeminiGenerated =
+                                                    msg.senderId === "gemini-bot" ||
+                                                    msg.aiSource === "gemini" ||
+                                                    /^Gemini:\s*/i.test(msg.content);
+                                                const markdownContent = isGeminiGenerated
+                                                    ? msg.content.replace(/^Gemini:\s*/i, "")
+                                                    : msg.content;
+                                                const isMe = !isGeminiGenerated && msg.senderId === currentUserId;
+                                                const senderName = isGeminiGenerated ? "Gemini" : getSenderDisplayName(msg.senderId);
+                                                const avatarToken = getAvatarToken(senderName);
+                                                return (
+                                                    <div key={msg.id} className={`group flex ${isMe ? "justify-end" : "justify-start"}`}>
+                                                        <div className={`max-w-[70%] border px-4 py-3 ${isMe
+                                                            ? "border-[#6F62A3] bg-[#2A2248] text-[#F0ECFF]"
+                                                            : "border-[#3A335D] bg-[#14102B] text-[#CDC6EA]"
+                                                            }`}>
+                                                            <div className={`mb-2 flex items-center gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openUserProfile(msg.senderId)}
+                                                                    title="Open profile"
+                                                                    aria-label={`Open ${senderName} profile`}
+                                                                    className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#6F62A3] bg-[#1C1736] text-[10px] font-semibold text-[#EDE7FF]"
+                                                                >
+                                                                    {avatarToken}
+                                                                </button>
+                                                                <span className="text-[10px] tracking-[0.08em] text-[#B9B1D9]">
+                                                                    {senderName}
+                                                                </span>
+                                                            </div>
+
+                                                            {msg.replyToId && (
+                                                                <div className="mb-2 border-l-2 border-[#6F62A3] bg-black/20 p-2 text-[10px] italic text-[#A298C3]">
+                                                                    {messages.find(m => m.id === msg.replyToId)?.content || "Message deleted"}
+                                                                </div>
+                                                            )}
+                                                            {isGeminiGenerated ? (
+                                                                <div className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">
+                                                                    <ReactMarkdown
+                                                                        remarkPlugins={[remarkGfm]}
+                                                                        rehypePlugins={[rehypeSanitize]}
+                                                                        components={{
+                                                                            h1: ({ children }) => <h1 className="text-base font-semibold mt-2 mb-1">{children}</h1>,
+                                                                            h2: ({ children }) => <h2 className="text-sm font-semibold mt-2 mb-1">{children}</h2>,
+                                                                            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                                                            ul: ({ children }) => <ul className="list-disc pl-5 mb-2">{children}</ul>,
+                                                                            ol: ({ children }) => <ol className="list-decimal pl-5 mb-2">{children}</ol>,
+                                                                            li: ({ children }) => <li className="mb-1">{children}</li>,
+                                                                            code: ({ children }) => (
+                                                                                <code className="rounded bg-black/30 px-1 py-0.5 text-xs">{children}</code>
+                                                                            ),
+                                                                            pre: ({ children }) => (
+                                                                                <pre className="my-2 overflow-x-auto rounded bg-black/35 p-3 text-xs">{children}</pre>
+                                                                            ),
+                                                                            a: ({ href, children }) => (
+                                                                                <a
+                                                                                    href={href}
+                                                                                    target="_blank"
+                                                                                    rel="noreferrer"
+                                                                                    className="underline text-[#9fd2ff]"
+                                                                                >
+                                                                                    {children}
+                                                                                </a>
+                                                                            ),
+                                                                        }}
+                                                                    >
+                                                                        {markdownContent}
+                                                                    </ReactMarkdown>
+                                                                </div>
+                                                            ) : (
+                                                                <>
+                                                                    <p className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">{msg.content}</p>
+                                                                    {(() => {
+                                                                        const urlMatch = msg.content.match(/https?:\/\/[^\s]+/);
+                                                                        return urlMatch ? <LinkPreview url={urlMatch[0]} /> : null;
+                                                                    })()}
+                                                                </>
+                                                            )}
+                                                            <div className="mt-2 flex flex-wrap items-center gap-1">
+                                                                {msg.reactions && msg.reactions.length > 0 && (
+                                                                    <div className="flex flex-wrap gap-1">
+                                                                        {Array.from(new Set(msg.reactions.map(r => r.emoji))).map(emoji => {
+                                                                            const count = msg.reactions?.filter(r => r.emoji === emoji).length;
+                                                                            const hasReacted = msg.reactions?.some(r => r.userId === currentUserId && r.emoji === emoji);
+                                                                            return (
+                                                                                <button
+                                                                                    key={emoji}
+                                                                                    onClick={() => handleToggleReaction(msg.id, emoji)}
+                                                                                    className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] transition ${hasReacted
+                                                                                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-400"
+                                                                                        : "border-[#3A335D] bg-[#1C1736] text-[#8D83B2] hover:border-[#6F62A3]"
+                                                                                        }`}
+                                                                                >
+                                                                                    <span>{emoji}</span>
+                                                                                    {count! > 1 && <span>{count}</span>}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                )}
+                                                                <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    {['👍', '❤️', '😂', '😮', '😢'].map(emoji => (
+                                                                        <button
+                                                                            key={emoji}
+                                                                            onClick={() => handleToggleReaction(msg.id, emoji)}
+                                                                            className="hover:scale-125 transition-transform"
+                                                                            title={emoji}
+                                                                        >
+                                                                            {emoji}
+                                                                        </button>
+                                                                    ))}
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setReplyingTo(msg);
+                                                                            const input = document.querySelector('input[name="msg"]') as HTMLInputElement;
+                                                                            input?.focus();
+                                                                        }}
+                                                                        className="ml-1 text-[10px] text-[#6E62A3] hover:text-[#D6D0EF]"
+                                                                        title="Reply"
+                                                                    >
+                                                                        Reply
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            <div className="mt-2 flex items-center gap-2 text-[10px] tracking-[0.12em] uppercase">
+                                                                <span className={isMe ? "text-[#BBB1DF]" : "text-[#8D83B2]"}>
+                                                                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                                                </span>
+                                                                {isMe && <span className="text-[#CFC6EF]">{getStatusLabel(msg)}</span>}
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                ))}
+                                                );
+                                            })
+                                        ) : (
+                                            <div className="mx-auto mt-16 max-w-3xl border border-[#3A335D] bg-[#15112B]/80 p-8">
+                                                <p className="text-3xl font-semibold tracking-[0.02em] text-[#F0ECFF]">NO ACTIVE THREAD</p>
+                                                <p className="mt-4 text-[11px] tracking-[0.16em] text-[#9C93BE] uppercase">
+                                                    Your workspace is quiet. Dive back into your recent conversations.
+                                                </p>
                                             </div>
-                                        </div>
+                                        )}
+                                        <div ref={scrollRef} />
+                                    </div>
 
-                                        <div>
-                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Room Join Requests</p>
-                                            <div className="space-y-1">
-                                                {roomJoinRequests.length === 0 && (
-                                                    <p className="text-[10px] text-[#7F78A3]">No pending join requests</p>
+                                    <div className="border-t border-[#2B2448] bg-[#0E0A21] px-8 py-5">
+                                        {replyingTo && (
+                                            <div className="flex items-center justify-between border-t border-[#3E3563] bg-[#1A1434] px-4 py-2 text-[10px] text-[#A298C3]">
+                                                <div className="truncate">
+                                                    <span className="font-bold">Replying to:</span> {replyingTo.content}
+                                                </div>
+                                                <button onClick={() => setReplyingTo(null)} className="ml-2 text-[#D95A6F] hover:text-white">✕</button>
+                                            </div>
+                                        )}
+                                        <form className="flex gap-2" onSubmit={handleSendMessage}>
+                                            <input
+                                                name="msg"
+                                                value={messageDraft}
+                                                onChange={handleMessageInputChange}
+                                                className="flex-1 border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
+                                                placeholder={
+                                                    activeChat.type === "direct" && relationshipStatus === "NONE"
+                                                        ? "Send a message to start a conversation..."
+                                                        : "Transmit message..."
+                                                }
+                                            />
+                                            <button
+                                                disabled={isSending || (activeChat.type === "direct" && relationshipStatus === "PENDING")}
+                                                className="border border-[#554A80] bg-[#251E42] px-6 py-3 text-xs font-semibold tracking-[0.18em] text-[#F4F0FF] uppercase transition hover:bg-[#32275A] disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                {isSending ? "Sending" : "Send"}
+                                            </button>
+                                        </form>
+                                        {sendError && <p className="mt-2 text-xs text-rose-300">{sendError}</p>}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="relative flex h-full flex-col px-6 py-4 sm:px-8 sm:py-5">
+                                <form className="flex items-start justify-between" onSubmit={handleSearchID}>
+                                    <div>
+                                        <h1 className="text-5xl font-bold leading-none tracking-[0.02em] text-[#F6F2FF]">CHATRIX</h1>
+                                        <p className="mt-1 text-[10px] tracking-[0.3em] text-[#958BB8] uppercase">STUDIO v1.0</p>
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={!searchQuery || isSearching}
+                                        className="inline-flex h-8 w-8 items-center justify-center border border-[#463D6A] bg-[#1A1434] text-[#D4CCEE] transition hover:bg-[#241C46] disabled:cursor-not-allowed disabled:opacity-50"
+                                        title="Search user by ID or name"
+                                    >
+                                        ⌕
+                                    </button>
+                                </form>
+
+                                <form className="mt-6 max-w-md" onSubmit={handleSearchID}>
+                                    <input
+                                        value={searchQuery}
+                                        onChange={(e) => {
+                                            const target = e.currentTarget as unknown as { value: string };
+                                            setSearchQuery(target.value);
+                                        }}
+                                        placeholder="Paste user ID or name"
+                                        className="w-full border border-[#403760] bg-[#120E2A] px-3 py-2 text-[11px] tracking-[0.08em] text-[#D6D0EF] outline-none placeholder:text-[#7D73A0] focus:border-[#6C619A]"
+                                    />
+                                </form>
+
+                                <div className="mt-8 max-w-4xl">
+                                    <p className="text-[11px] tracking-[0.28em] text-[#9E96C1] uppercase">Select a conversation to start messaging</p>
+                                    <h2 className="mt-2 text-[clamp(54px,9vw,112px)] font-black leading-none tracking-[0.01em] text-[#FFFFFF1A]">CHATS</h2>
+                                </div>
+
+                                <div className="mt-10 flex items-center gap-3 text-[11px] tracking-[0.24em] text-[#7E75A5] uppercase">
+                                    <span className="inline-flex h-9 w-9 items-center justify-center border border-[#3D345E] bg-[#120E28]">◧</span>
+                                    REF.00.CHAT
+                                </div>
+
+                                <div className="mt-8 max-w-4xl border border-[#3A325B] bg-[#1A1434]/75 px-6 py-6">
+                                    <p className="text-3xl font-semibold tracking-[0.01em] text-[#F3EEFF]">NO ACTIVE THREAD</p>
+                                    <p className="mt-3 text-[11px] tracking-[0.15em] text-[#A298C3] uppercase">
+                                        Your workspace is quiet. Dive back into your recent conversations or start a new connection.
+                                    </p>
+                                </div>
+
+                                <div className="mt-8 flex flex-wrap items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSidebarMode("direct");
+                                        }}
+                                        className="border border-[#E7E3F5] bg-[#F4F1FA] px-10 py-4 text-xs font-bold tracking-[0.28em] text-[#090814] uppercase transition hover:bg-white"
+                                    >
+                                        Start A Discussion
+                                    </button>
+                                    <span className="text-[10px] tracking-[0.22em] text-[#766C9B] uppercase">ACTION.EXE</span>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+                </div>
+
+                {showCreateRoomModal && (
+                    <div className="fixed inset-0 z-50 grid place-items-center bg-[#05040D]/80 p-4 backdrop-blur-sm">
+                        <div className="w-full max-w-md border border-[#2B2448] bg-[rgba(14,10,33,0.95)] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.68)]">
+                            <h3 className="text-lg font-semibold tracking-[0.08em] text-[#F1EDFF]">Create New Room</h3>
+                            <p className="mt-1 text-xs tracking-[0.14em] text-[#A79FC8] uppercase">Give your room a clear, short name.</p>
+
+                            <form className="mt-4 space-y-3" onSubmit={handleCreateRoom}>
+                                <input
+                                    value={newRoomName}
+                                    onChange={(e) => {
+                                        const target = e.currentTarget as unknown as { value: string };
+                                        setNewRoomName(target.value);
+                                    }}
+                                    placeholder="e.g. design-ops"
+                                    className="w-full border border-[#3E3563] bg-[#120E29] px-3 py-2 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
+                                />
+
+                                {createRoomError && (
+                                    <p className="text-sm text-rose-400">{createRoomError}</p>
+                                )}
+
+                                <div className="flex justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowCreateRoomModal(false)}
+                                        className="border border-[#3A335A] px-3 py-2 text-sm text-[#B8B0DA] hover:bg-[#15112B]"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={isCreatingRoom}
+                                        className="border border-[#554A80] bg-[#251E42] px-3 py-2 text-sm font-bold text-[#F4F0FF] hover:bg-[#32275A] disabled:opacity-70"
+                                    >
+                                        {isCreatingRoom ? "Creating..." : "Create Room"}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+                {selectedProfileUser && (
+                    <div className="fixed inset-0 z-50 grid place-items-center bg-[#05040D]/80 p-4 backdrop-blur-sm">
+                        <div className="w-full max-w-md border border-[#2B2448] bg-[rgba(14,10,33,0.95)] p-8 shadow-[0_20px_80px_rgba(0,0,0,0.68)]">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-2xl font-bold tracking-[0.04em] text-[#F1EDFF]">{selectedProfileUser.name || "User Profile"}</h3>
+                                <button onClick={() => setSelectedProfileUser(null)} className="text-[#6E62A3] hover:text-white">✕</button>
+                            </div>
+                            <p className="mt-1 text-xs tracking-[0.14em] text-[#A79FC8] uppercase">{selectedProfileUser.email}</p>
+
+                            {(requestActionError || requestActionInfo) && (
+                                <div className={`mt-4 rounded border p-3 text-[10px] font-bold uppercase tracking-widest ${requestActionError ? "border-rose-500/50 bg-rose-500/10 text-rose-400" : "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"}`}>
+                                    {requestActionError || requestActionInfo}
+                                </div>
+                            )}
+
+                            <div className="mt-8 space-y-4">
+                                <div className="rounded border border-[#2B2450] bg-black/20 p-4">
+                                    <p className="text-[10px] font-bold text-[#8D83B2] uppercase tracking-[0.2em] mb-2">User ID</p>
+                                    <p className="text-xs font-mono text-[#D6D0EF] break-all">{selectedProfileUser.id}</p>
+                                </div>
+
+                                {selectedProfileUser.id !== currentUserId && (
+                                    <div className="space-y-3">
+                                        <button
+                                            onClick={() => {
+                                                setActiveChat({ id: selectedProfileUser.id, type: "direct" });
+                                                setSelectedProfileUser(null);
+                                                setSidebarMode(null);
+                                            }}
+                                            className="w-full border border-[#554A80] bg-[#251E42] py-3 text-xs font-bold tracking-[0.2em] text-[#F4F0FF] uppercase hover:bg-[#32275A]"
+                                        >
+                                            Message
+                                        </button>
+
+                                        <div className="pt-4 border-t border-[#2B2450]">
+                                            <h4 className="text-[10px] font-bold text-[#8D83B2] uppercase tracking-widest mb-3">Invite to your Rooms</h4>
+                                            <div className="max-h-32 overflow-y-auto space-y-2 pr-2">
+                                                {data.rooms.filter(r => r.creatorId === currentUserId).length === 0 && (
+                                                    <p className="text-[10px] text-[#6E62A3]">You don't own any rooms yet.</p>
                                                 )}
-                                                {roomJoinRequests.map((r) => (
-                                                    <div key={r.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF] font-semibold">{r.user_name || r.userId} wants to join</p>
-                                                        <p className="text-[9px] text-[#8D83B2] mb-2">Room ID: {r.roomId}</p>
-                                                        <div className="flex gap-1">
-                                                            <button onClick={() => handleRespondJoinRoom(r.id, 'accept')} className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-emerald-400">Approve</button>
-                                                            <button onClick={() => handleRespondJoinRoom(r.id, 'reject')} className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-rose-400">Reject</button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Room Invitations</p>
-                                            <div className="space-y-1">
-                                                {roomInvites.length === 0 && (
-                                                    <p className="text-[10px] text-[#7F78A3]">No new invites</p>
-                                                )}
-                                                {roomInvites.map((i) => (
-                                                    <div key={i.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF] font-semibold">Join # {i.room_name}</p>
-                                                        <p className="text-[9px] text-[#8D83B2] mb-2">Invite from {i.from_user_name}</p>
-                                                        <div className="flex gap-1">
-                                                            <button onClick={() => handleRespondRoomInvite(i.id, 'accept')} className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-emerald-400">Accept</button>
-                                                            <button onClick={() => handleRespondRoomInvite(i.id, 'reject')} className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-rose-400">Decline</button>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <p className="mb-2 text-[10px] tracking-[0.16em] text-[#9C93BE] uppercase">Friends</p>
-                                            <div className="space-y-1">
-                                                {friends.length === 0 && <p className="text-[10px] text-[#7F78A3]">No friends yet</p>}
-                                                {friends.map((f) => (
-                                                    <div key={f.id} className="rounded border border-[#2B2450] bg-[#0F0C21] p-2">
-                                                        <p className="truncate text-[11px] text-[#D6D0EF]">{f.name || f.email || f.id}</p>
-                                                        <div className="mt-2 flex gap-1">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setActiveChat({ id: f.id, type: "direct" });
-                                                                    setSidebarMode(null);
-                                                                }}
-                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
-                                                            >
-                                                                Chat
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                disabled={requestActionLoading === `unfriend-${f.id}`}
-                                                                onClick={() => {
-                                                                    const bearerToken = getBearerToken();
-                                                                    if (!bearerToken) return;
-                                                                    runRequestAction(
-                                                                        `unfriend-${f.id}`,
-                                                                        () =>
-                                                                            fetch(`${API_BASE}/api/friends/unfriend`, {
-                                                                                method: "POST",
-                                                                                headers: authHeaders(bearerToken),
-                                                                                body: JSON.stringify({ userId: f.id }),
-                                                                            }),
-                                                                        "Unfriended",
-                                                                    );
-                                                                }}
-                                                                className="border border-[#4B426F] bg-[#1A1534] px-2 py-1 text-[9px] uppercase text-[#ECE8FB]"
-                                                            >
-                                                                Unfriend
-                                                            </button>
-                                                        </div>
+                                                {data.rooms.filter(r => r.creatorId === currentUserId).map(r => (
+                                                    <div key={r.id} className="flex items-center justify-between rounded bg-black/30 p-2">
+                                                        <span className="text-[10px] text-[#D6D0EF]"># {r.name}</span>
+                                                        <button
+                                                            onClick={() => handleInviteToRoom(r.id, selectedProfileUser.id)}
+                                                            className="text-[9px] font-bold text-[#A298C3] uppercase hover:text-emerald-400"
+                                                        >
+                                                            INVITE
+                                                        </button>
                                                     </div>
                                                 ))}
                                             </div>
                                         </div>
                                     </div>
                                 )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {/* RIGHT SIDEBAR: NOTIFICATION PANEL */}
+                <div
+                    className={`fixed right-0 top-0 z-50 h-full border-l border-[#24203B] bg-[rgba(8,6,20,0.95)] backdrop-blur-2xl transition-all duration-500 overflow-hidden shadow-[-20px_0_50px_rgba(0,0,0,0.5)] ${showNotifications ? "w-96" : "w-0"}`}
+                >
+                    <div className="flex h-full flex-col p-8">
+                        <div className="flex items-center justify-between mb-8">
+                            <h3 className="text-sm font-bold tracking-[0.25em] text-[#D9D2F1] uppercase">Notifications</h3>
+                            <button onClick={() => setShowNotifications(false)} className="text-[#6E62A3] hover:text-[#F1EDFF] transition">✕</button>
                         </div>
 
-                        {requestActionInfo && (
-                            <p className="mt-2 border border-emerald-900/40 bg-emerald-950/30 px-2 py-2 text-[9px] text-emerald-300">
-                                {requestActionInfo}
-                            </p>
-                        )}
-                        {requestActionError && (
-                            <p className="mt-2 border border-rose-900/50 bg-rose-950/30 px-2 py-2 text-[9px] text-rose-300">
-                                {requestActionError}
-                            </p>
-                        )}
-                        {!session && !isPending && (
-                            <p className="mt-3 border border-amber-900/40 bg-amber-950/30 px-2 py-2 text-[9px] text-amber-300">Sign in to load contacts.</p>
-                        )}
-                        {isLoading && (
-                            <div className="mt-4 space-y-3">
-                                <Skeleton className="h-8 w-full" />
-                                <Skeleton className="h-8 w-full" />
-                                <Skeleton className="h-8 w-full" />
-                            </div>
-                        )}
-                        {error && <p className="mt-3 border border-rose-900/50 bg-rose-950/30 px-2 py-2 text-[9px] text-rose-300">Error: {error}</p>}
-                    </div>
-                </div>
-
-                <main className="relative flex-1 overflow-hidden border-l border-[#1D1734] bg-[linear-gradient(145deg,rgba(35,16,66,0.7)_0%,rgba(9,7,30,0.96)_45%,rgba(6,5,20,1)_100%)]">
-                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_100%_at_20%_10%,rgba(163,140,223,0.18)_0%,rgba(24,18,48,0)_52%)]" />
-
-                    {activeChat.id ? (
-                        <div className="relative flex h-full flex-col">
-                            <div className="flex items-start justify-between border-b border-[#272043] px-8 py-6">
-                                <div>
-                                    <p className="text-[10px] tracking-[0.28em] text-[#8D83B2] uppercase">Active Thread</p>
-                                    <div className="flex items-center gap-3">
-                                        <h2 className="mt-2 text-4xl font-semibold tracking-[0.04em] text-[#F1EDFF]">
-                                            {activeChat.type === "direct"
-                                                ? (data.users.find(u => u.id === activeChat.id)?.name || activeChat.id)
-                                                : activeChat.id
-                                            }
-                                        </h2>
-                                        {activeChat.type === "direct" && onlineUsers.has(activeChat.id) && (
-                                            <div className="mt-3 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 border border-emerald-500/20">
-                                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                                <span className="text-[10px] font-bold tracking-wider text-emerald-400 uppercase">Online</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <p className="mt-1 text-[11px] tracking-[0.2em] text-[#A79FC8] uppercase">{activeChat.type}</p>
-                                        {activeChat.type === "direct" && typingStatus[activeChat.id] && (
-                                            <span className="mt-1 text-[11px] italic text-emerald-400 animate-pulse">is typing...</span>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <button
-                                        type="button"
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#6F62A3] hover:text-[#D6D0EF]"
-                                        title="Audio Call"
-                                    >
-                                        📞
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#6F62A3] hover:text-[#D6D0EF]"
-                                        title="Video Call"
-                                    >
-                                        📹
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setActiveChat({ id: null, type: null })}
-                                        className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#3A335D] bg-[#1A1434] text-[#8D83B2] transition hover:border-[#D95A6F] hover:text-[#D95A6F]"
-                                        title="Close Chat"
-                                    >
-                                        ✕
-                                    </button>
-                                </div>
-                            </div>
-                            {activeChat.id && activeChat.type === "room" && (
-                                (() => {
-                                    const room = data.rooms.find(r => r.id === activeChat.id);
-                                    const isCreator = room?.creatorId === currentUserId;
-                                    // We'd need to know if we are a member. 
-                                    // Let's check messages array or a specific membership state.
-                                    // Simplest for now: if we failed to load messages, we are restricted.
-                                    if (error === "Forbidden: Not a room member") {
-                                        return (
-                                            <div className="border-b border-[#3A335D]/50 bg-[#14102B]/60 px-8 py-4 backdrop-blur-md">
-                                                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2A2248] text-[#9C93BE]">🔒</div>
-                                                        <div>
-                                                            <p className="text-xs font-semibold tracking-wide text-[#F1EDFF]">Private Room</p>
-                                                            <p className="text-[10px] text-[#8D83B2]">You must be a member to view this room.</p>
-                                                        </div>
+                        <div className="flex-1 space-y-8 overflow-y-auto pr-2 custom-scrollbar">
+                            {/* ROOM ACTIVITY SECTION */}
+                            {(roomJoinRequests.length > 0 || roomInvites.length > 0) && (
+                                <div className="space-y-4">
+                                    <p className="text-[10px] font-bold tracking-widest text-[#6E62A3] uppercase">Room Activity</p>
+                                    {roomJoinRequests.map((r) => (
+                                        <div key={r.id} className="rounded-xl border border-[#2B2450] bg-[#0F0C21]/50 p-4">
+                                            <div className="flex items-start gap-3">
+                                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1A1534] text-[10px] font-bold text-violet-400">
+                                                    {getAvatarToken(r.user_name)}
+                                                </div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-xs font-semibold text-[#D6D0EF]">{r.user_name || "New User"}</p>
+                                                    <p className="mt-0.5 text-[10px] text-[#8D83B2]">Join request: <span className="text-violet-300">#{r.roomId.slice(0, 8)}</span></p>
+                                                    <div className="mt-3 flex gap-2">
+                                                        <button onClick={() => handleRespondJoinRoom(r.id, 'accept')} className="flex-1 rounded-md bg-emerald-500/10 py-1.5 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20">Accept</button>
+                                                        <button onClick={() => handleRespondJoinRoom(r.id, 'reject')} className="flex-1 rounded-md bg-rose-500/10 py-1.5 text-[10px] font-bold text-rose-400 hover:bg-rose-500/20">Decline</button>
                                                     </div>
-                                                    <button
-                                                        onClick={() => handleRequestJoinRoom(activeChat.id!)}
-                                                        className="rounded border border-[#6E62A3] bg-[#2A2248] px-4 py-2 text-[10px] font-bold tracking-[0.12em] text-[#F1EDFF] uppercase transition hover:border-[#F1EDFF]"
-                                                    >
-                                                        Request to Join
-                                                    </button>
                                                 </div>
                                             </div>
-                                        );
-                                    }
-                                    if (isCreator) {
-                                        // Optionally show button to view requests
-                                        return (
-                                            <div className="border-b border-[#3A335D]/50 bg-[#14102B]/30 px-8 py-2">
-                                                <button
-                                                    onClick={async () => {
-                                                        const res = await fetch(`${API_BASE}/api/rooms/${activeChat.id}/join-requests`, {
-                                                            headers: { Authorization: `Bearer ${getBearerToken()}` }
-                                                        });
-                                                        if (res.ok) setRoomJoinRequests(await res.json());
-                                                    }}
-                                                    className="text-[9px] font-bold text-emerald-400 uppercase tracking-widest hover:text-emerald-300"
-                                                >
-                                                    Manage Join Requests ({roomJoinRequests.filter(r => r.roomId === activeChat.id).length})
-                                                </button>
-                                                {roomJoinRequests.filter(r => r.roomId === activeChat.id).map(req => (
-                                                    <div key={req.id} className="mt-2 flex items-center justify-between bg-black/20 p-2 rounded">
-                                                        <span className="text-[10px] text-[#D6D0EF]">{req.user_name} wants to join</span>
-                                                        <div className="flex gap-2">
-                                                            <button onClick={() => handleRespondJoinRoom(req.id, 'accept')} className="text-[9px] text-emerald-400 font-bold">ACCEPT</button>
-                                                            <button onClick={() => handleRespondJoinRoom(req.id, 'reject')} className="text-[9px] text-rose-400 font-bold">REJECT</button>
-                                                        </div>
+                                        </div>
+                                    ))}
+                                    {roomInvites.map((i) => (
+                                        <div key={i.id} className="rounded-xl border border-[#2B2450] bg-[#0F0C21]/50 p-4">
+                                            <div className="flex items-start gap-3">
+                                                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#2A2248] text-sm">✉</div>
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="truncate text-xs font-semibold text-[#D6D0EF]">Join #{i.room_name}</p>
+                                                    <p className="mt-0.5 text-[10px] text-[#8D83B2]">Invite from {i.from_user_name}</p>
+                                                    <div className="mt-3 flex gap-2">
+                                                        <button onClick={() => handleRespondRoomInvite(i.id, 'accept')} className="flex-1 rounded-md bg-emerald-500/10 py-1.5 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20">Join</button>
+                                                        <button onClick={() => handleRespondRoomInvite(i.id, 'reject')} className="flex-1 rounded-md bg-rose-500/10 py-1.5 text-[10px] font-bold text-rose-400 hover:bg-rose-500/20">Ignore</button>
                                                     </div>
-                                                ))}
+                                                </div>
                                             </div>
-                                        );
-                                    }
-                                    return null;
-                                })()
+                                        </div>
+                                    ))}
+                                </div>
                             )}
-                            {activeChat.type === "direct" && chatRestricted && activeChat.id && (
-                                <div className="border-b border-[#3A335D]/50 bg-[#14102B]/60 px-8 py-4 backdrop-blur-md">
-                                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+                            {/* FRIEND REQUESTS SECTION */}
+                            <div className="space-y-4">
+                                <p className="text-[10px] font-bold tracking-widest text-[#6E62A3] uppercase">Friend Requests</p>
+                                {friendRequestsIncoming.length === 0 && <p className="text-[10px] text-[#4A4273] italic">No pending requests</p>}
+                                {friendRequestsIncoming.map((r) => (
+                                    <div key={r.id} className="rounded-xl border border-[#2B2450] bg-[#0F0C21]/50 p-4">
                                         <div className="flex items-center gap-3">
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2A2248] text-[#9C93BE]">
-                                                {relationshipStatus === "PENDING" ? "⏳" : "🔒"}
+                                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1A1534] text-[11px] font-bold text-violet-400">
+                                                {getAvatarToken(r.from_user_name)}
                                             </div>
-                                            <div>
-                                                <p className="text-xs font-semibold tracking-wide text-[#F1EDFF]">
-                                                    {relationshipStatus === "PENDING" ? "Request Pending" : "Message Request Required"}
-                                                </p>
-                                                <p className="text-[10px] text-[#8D83B2]">
-                                                    {relationshipStatus === "PENDING"
-                                                        ? "Waiting for the recipient to accept your chat request."
-                                                        : "You need to send a request to start chatting with this user."}
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        {relationshipStatus === "NONE" && (
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    // focus the input to prompt sending a message as request
-                                                    const input = document.querySelector('input[name="msg"]') as HTMLInputElement;
-                                                    input?.focus();
-                                                }}
-                                                className="group relative overflow-hidden rounded border border-[#6E62A3] bg-[#2A2248] px-4 py-2 text-[10px] font-bold tracking-[0.12em] text-[#F1EDFF] uppercase transition hover:border-[#F1EDFF]"
-                                            >
-                                                <span className="relative z-10">Send Request via Message</span>
-                                                <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/5 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="flex flex-1 flex-col overflow-hidden">
-                                <div className="flex-1 space-y-4 overflow-y-auto px-8 py-6">
-                                    {messages.length > 0 ? (
-                                        messages.map((msg: MessageItem) => {
-                                            const isGeminiGenerated =
-                                                msg.senderId === "gemini-bot" ||
-                                                msg.aiSource === "gemini" ||
-                                                /^Gemini:\s*/i.test(msg.content);
-                                            const markdownContent = isGeminiGenerated
-                                                ? msg.content.replace(/^Gemini:\s*/i, "")
-                                                : msg.content;
-                                            const isMe = !isGeminiGenerated && msg.senderId === currentUserId;
-                                            const senderName = isGeminiGenerated ? "Gemini" : getSenderDisplayName(msg.senderId);
-                                            const avatarToken = getAvatarToken(senderName);
-                                            return (
-                                                <div key={msg.id} className={`group flex ${isMe ? "justify-end" : "justify-start"}`}>
-                                                    <div className={`max-w-[70%] border px-4 py-3 ${isMe
-                                                        ? "border-[#6F62A3] bg-[#2A2248] text-[#F0ECFF]"
-                                                        : "border-[#3A335D] bg-[#14102B] text-[#CDC6EA]"
-                                                        }`}>
-                                                        <div className={`mb-2 flex items-center gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => openUserProfile(msg.senderId)}
-                                                                title="Open profile"
-                                                                aria-label={`Open ${senderName} profile`}
-                                                                className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#6F62A3] bg-[#1C1736] text-[10px] font-semibold text-[#EDE7FF]"
-                                                            >
-                                                                {avatarToken}
-                                                            </button>
-                                                            <span className="text-[10px] tracking-[0.08em] text-[#B9B1D9]">
-                                                                {senderName}
-                                                            </span>
-                                                        </div>
-
-                                                        {msg.replyToId && (
-                                                            <div className="mb-2 border-l-2 border-[#6F62A3] bg-black/20 p-2 text-[10px] italic text-[#A298C3]">
-                                                                {messages.find(m => m.id === msg.replyToId)?.content || "Message deleted"}
-                                                            </div>
-                                                        )}
-                                                        {isGeminiGenerated ? (
-                                                            <div className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">
-                                                                <ReactMarkdown
-                                                                    remarkPlugins={[remarkGfm]}
-                                                                    rehypePlugins={[rehypeSanitize]}
-                                                                    components={{
-                                                                        h1: ({ children }) => <h1 className="text-base font-semibold mt-2 mb-1">{children}</h1>,
-                                                                        h2: ({ children }) => <h2 className="text-sm font-semibold mt-2 mb-1">{children}</h2>,
-                                                                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                                                                        ul: ({ children }) => <ul className="list-disc pl-5 mb-2">{children}</ul>,
-                                                                        ol: ({ children }) => <ol className="list-decimal pl-5 mb-2">{children}</ol>,
-                                                                        li: ({ children }) => <li className="mb-1">{children}</li>,
-                                                                        code: ({ children }) => (
-                                                                            <code className="rounded bg-black/30 px-1 py-0.5 text-xs">{children}</code>
-                                                                        ),
-                                                                        pre: ({ children }) => (
-                                                                            <pre className="my-2 overflow-x-auto rounded bg-black/35 p-3 text-xs">{children}</pre>
-                                                                        ),
-                                                                        a: ({ href, children }) => (
-                                                                            <a
-                                                                                href={href}
-                                                                                target="_blank"
-                                                                                rel="noreferrer"
-                                                                                className="underline text-[#9fd2ff]"
-                                                                            >
-                                                                                {children}
-                                                                            </a>
-                                                                        ),
-                                                                    }}
-                                                                >
-                                                                    {markdownContent}
-                                                                </ReactMarkdown>
-                                                            </div>
-                                                        ) : (
-                                                            <>
-                                                                <p className="text-sm leading-relaxed whitespace-pre-wrap wrap-break-word">{msg.content}</p>
-                                                                {(() => {
-                                                                    const urlMatch = msg.content.match(/https?:\/\/[^\s]+/);
-                                                                    return urlMatch ? <LinkPreview url={urlMatch[0]} /> : null;
-                                                                })()}
-                                                            </>
-                                                        )}
-                                                        <div className="mt-2 flex flex-wrap items-center gap-1">
-                                                            {msg.reactions && msg.reactions.length > 0 && (
-                                                                <div className="flex flex-wrap gap-1">
-                                                                    {Array.from(new Set(msg.reactions.map(r => r.emoji))).map(emoji => {
-                                                                        const count = msg.reactions?.filter(r => r.emoji === emoji).length;
-                                                                        const hasReacted = msg.reactions?.some(r => r.userId === currentUserId && r.emoji === emoji);
-                                                                        return (
-                                                                            <button
-                                                                                key={emoji}
-                                                                                onClick={() => handleToggleReaction(msg.id, emoji)}
-                                                                                className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] transition ${hasReacted
-                                                                                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-400"
-                                                                                    : "border-[#3A335D] bg-[#1C1736] text-[#8D83B2] hover:border-[#6F62A3]"
-                                                                                    }`}
-                                                                            >
-                                                                                <span>{emoji}</span>
-                                                                                {count! > 1 && <span>{count}</span>}
-                                                                            </button>
-                                                                        );
-                                                                    })}
-                                                                </div>
-                                                            )}
-                                                            <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                {['👍', '❤️', '😂', '😮', '😢'].map(emoji => (
-                                                                    <button
-                                                                        key={emoji}
-                                                                        onClick={() => handleToggleReaction(msg.id, emoji)}
-                                                                        className="hover:scale-125 transition-transform"
-                                                                        title={emoji}
-                                                                    >
-                                                                        {emoji}
-                                                                    </button>
-                                                                ))}
-                                                                <button
-                                                                    onClick={() => {
-                                                                        setReplyingTo(msg);
-                                                                        const input = document.querySelector('input[name="msg"]') as HTMLInputElement;
-                                                                        input?.focus();
-                                                                    }}
-                                                                    className="ml-1 text-[10px] text-[#6E62A3] hover:text-[#D6D0EF]"
-                                                                    title="Reply"
-                                                                >
-                                                                    Reply
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                        <div className="mt-2 flex items-center gap-2 text-[10px] tracking-[0.12em] uppercase">
-                                                            <span className={isMe ? "text-[#BBB1DF]" : "text-[#8D83B2]"}>
-                                                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                                                            </span>
-                                                            {isMe && <span className="text-[#CFC6EF]">{getStatusLabel(msg)}</span>}
-                                                        </div>
-                                                    </div>
+                                            <div className="min-w-0 flex-1">
+                                                <p className="truncate text-xs font-semibold text-[#D6D0EF]">{r.from_user_name}</p>
+                                                <div className="mt-2 flex gap-2">
+                                                    <button onClick={() => runRequestAction(`f-accept-${r.id}`, () => fetch(`${API_BASE}/api/friend-requests/accept`, { method: "POST", headers: authHeaders(getBearerToken()!), body: JSON.stringify({ requestId: r.id }) }), "Accepted!")} className="flex-1 rounded-md bg-emerald-500/10 py-1.5 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/20">Accept</button>
+                                                    <button onClick={() => runRequestAction(`f-reject-${r.id}`, () => fetch(`${API_BASE}/api/friend-requests/reject`, { method: "POST", headers: authHeaders(getBearerToken()!), body: JSON.stringify({ requestId: r.id }) }), "Reject")} className="flex-1 rounded-md bg-rose-500/10 py-1.5 text-[10px] font-bold text-rose-400 hover:bg-rose-500/20">Reject</button>
                                                 </div>
-                                            );
-                                        })
-                                    ) : (
-                                        <div className="mx-auto mt-16 max-w-3xl border border-[#3A335D] bg-[#15112B]/80 p-8">
-                                            <p className="text-3xl font-semibold tracking-[0.02em] text-[#F0ECFF]">NO ACTIVE THREAD</p>
-                                            <p className="mt-4 text-[11px] tracking-[0.16em] text-[#9C93BE] uppercase">
-                                                Your workspace is quiet. Dive back into your recent conversations.
-                                            </p>
-                                        </div>
-                                    )}
-                                    <div ref={scrollRef} />
-                                </div>
-
-                                <div className="border-t border-[#2B2448] bg-[#0E0A21] px-8 py-5">
-                                    {replyingTo && (
-                                        <div className="flex items-center justify-between border-t border-[#3E3563] bg-[#1A1434] px-4 py-2 text-[10px] text-[#A298C3]">
-                                            <div className="truncate">
-                                                <span className="font-bold">Replying to:</span> {replyingTo.content}
                                             </div>
-                                            <button onClick={() => setReplyingTo(null)} className="ml-2 text-[#D95A6F] hover:text-white">✕</button>
                                         </div>
-                                    )}
-                                    <form className="flex gap-2" onSubmit={handleSendMessage}>
-                                        <input
-                                            name="msg"
-                                            value={messageDraft}
-                                            onChange={handleMessageInputChange}
-                                            className="flex-1 border border-[#3E3563] bg-[#120E29] px-4 py-3 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
-                                            placeholder={
-                                                activeChat.type === "direct" && relationshipStatus === "NONE"
-                                                    ? "Send a message to start a conversation..."
-                                                    : "Transmit message..."
-                                            }
-                                        />
-                                        <button
-                                            disabled={isSending || (activeChat.type === "direct" && relationshipStatus === "PENDING")}
-                                            className="border border-[#554A80] bg-[#251E42] px-6 py-3 text-xs font-semibold tracking-[0.18em] text-[#F4F0FF] uppercase transition hover:bg-[#32275A] disabled:cursor-not-allowed disabled:opacity-60"
-                                        >
-                                            {isSending ? "Sending" : "Send"}
-                                        </button>
-                                    </form>
-                                    {sendError && <p className="mt-2 text-xs text-rose-300">{sendError}</p>}
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* FRIENDS LIST SECTION (Simplified) */}
+                            <div className="space-y-4">
+                                <p className="text-[10px] font-bold tracking-widest text-[#6E62A3] uppercase">Friends Online</p>
+                                <div className="space-y-2">
+                                    {friends.filter(f => onlineUsers.has(f.id)).map((f) => (
+                                        <div key={f.id} className="flex items-center gap-3">
+                                            <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                                            <span className="text-xs text-[#B8B0DA]">{f.name || f.id}</span>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         </div>
-                    ) : (
-                        <div className="relative flex h-full flex-col px-6 py-4 sm:px-8 sm:py-5">
-                            <form className="flex items-start justify-between" onSubmit={handleSearchID}>
-                                <div>
-                                    <h1 className="text-5xl font-bold leading-none tracking-[0.02em] text-[#F6F2FF]">CHATRIX</h1>
-                                    <p className="mt-1 text-[10px] tracking-[0.3em] text-[#958BB8] uppercase">STUDIO v1.0</p>
-                                </div>
-                                <button
-                                    type="submit"
-                                    disabled={!searchQuery || isSearching}
-                                    className="inline-flex h-8 w-8 items-center justify-center border border-[#463D6A] bg-[#1A1434] text-[#D4CCEE] transition hover:bg-[#241C46] disabled:cursor-not-allowed disabled:opacity-50"
-                                    title="Search user by ID or name"
-                                >
-                                    ⌕
-                                </button>
-                            </form>
-
-                            <form className="mt-6 max-w-md" onSubmit={handleSearchID}>
-                                <input
-                                    value={searchQuery}
-                                    onChange={(e) => {
-                                        const target = e.currentTarget as unknown as { value: string };
-                                        setSearchQuery(target.value);
-                                    }}
-                                    placeholder="Paste user ID or name"
-                                    className="w-full border border-[#403760] bg-[#120E2A] px-3 py-2 text-[11px] tracking-[0.08em] text-[#D6D0EF] outline-none placeholder:text-[#7D73A0] focus:border-[#6C619A]"
-                                />
-                            </form>
-
-                            <div className="mt-8 max-w-4xl">
-                                <p className="text-[11px] tracking-[0.28em] text-[#9E96C1] uppercase">Select a conversation to start messaging</p>
-                                <h2 className="mt-2 text-[clamp(54px,9vw,112px)] font-black leading-none tracking-[0.01em] text-[#FFFFFF1A]">CHATS</h2>
-                            </div>
-
-                            <div className="mt-10 flex items-center gap-3 text-[11px] tracking-[0.24em] text-[#7E75A5] uppercase">
-                                <span className="inline-flex h-9 w-9 items-center justify-center border border-[#3D345E] bg-[#120E28]">◧</span>
-                                REF.00.CHAT
-                            </div>
-
-                            <div className="mt-8 max-w-4xl border border-[#3A325B] bg-[#1A1434]/75 px-6 py-6">
-                                <p className="text-3xl font-semibold tracking-[0.01em] text-[#F3EEFF]">NO ACTIVE THREAD</p>
-                                <p className="mt-3 text-[11px] tracking-[0.15em] text-[#A298C3] uppercase">
-                                    Your workspace is quiet. Dive back into your recent conversations or start a new connection.
-                                </p>
-                            </div>
-
-                            <div className="mt-8 flex flex-wrap items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setSidebarMode("direct");
-                                    }}
-                                    className="border border-[#E7E3F5] bg-[#F4F1FA] px-10 py-4 text-xs font-bold tracking-[0.28em] text-[#090814] uppercase transition hover:bg-white"
-                                >
-                                    Start A Discussion
-                                </button>
-                                <span className="text-[10px] tracking-[0.22em] text-[#766C9B] uppercase">ACTION.EXE</span>
-                            </div>
-                        </div>
-                    )}
-                </main>
+                    </div>
+                </div>
             </div>
-
-            {showCreateRoomModal && (
-                <div className="fixed inset-0 z-50 grid place-items-center bg-[#05040D]/80 p-4 backdrop-blur-sm">
-                    <div className="w-full max-w-md border border-[#2B2448] bg-[rgba(14,10,33,0.95)] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.68)]">
-                        <h3 className="text-lg font-semibold tracking-[0.08em] text-[#F1EDFF]">Create New Room</h3>
-                        <p className="mt-1 text-xs tracking-[0.14em] text-[#A79FC8] uppercase">Give your room a clear, short name.</p>
-
-                        <form className="mt-4 space-y-3" onSubmit={handleCreateRoom}>
-                            <input
-                                value={newRoomName}
-                                onChange={(e) => {
-                                    const target = e.currentTarget as unknown as { value: string };
-                                    setNewRoomName(target.value);
-                                }}
-                                placeholder="e.g. design-ops"
-                                className="w-full border border-[#3E3563] bg-[#120E29] px-3 py-2 text-sm text-[#E9E4FA] outline-none placeholder:text-[#8178A5] focus:border-[#6E62A3]"
-                            />
-
-                            {createRoomError && (
-                                <p className="text-sm text-rose-400">{createRoomError}</p>
-                            )}
-
-                            <div className="flex justify-end gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowCreateRoomModal(false)}
-                                    className="border border-[#3A335A] px-3 py-2 text-sm text-[#B8B0DA] hover:bg-[#15112B]"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={isCreatingRoom}
-                                    className="border border-[#554A80] bg-[#251E42] px-3 py-2 text-sm font-bold text-[#F4F0FF] hover:bg-[#32275A] disabled:opacity-70"
-                                >
-                                    {isCreatingRoom ? "Creating..." : "Create Room"}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-            {selectedProfileUser && (
-                <div className="fixed inset-0 z-50 grid place-items-center bg-[#05040D]/80 p-4 backdrop-blur-sm">
-                    <div className="w-full max-w-md border border-[#2B2448] bg-[rgba(14,10,33,0.95)] p-8 shadow-[0_20px_80px_rgba(0,0,0,0.68)]">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-2xl font-bold tracking-[0.04em] text-[#F1EDFF]">{selectedProfileUser.name || "User Profile"}</h3>
-                            <button onClick={() => setSelectedProfileUser(null)} className="text-[#6E62A3] hover:text-white">✕</button>
-                        </div>
-                        <p className="mt-1 text-xs tracking-[0.14em] text-[#A79FC8] uppercase">{selectedProfileUser.email}</p>
-
-                        {(requestActionError || requestActionInfo) && (
-                            <div className={`mt-4 rounded border p-3 text-[10px] font-bold uppercase tracking-widest ${requestActionError ? "border-rose-500/50 bg-rose-500/10 text-rose-400" : "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"}`}>
-                                {requestActionError || requestActionInfo}
-                            </div>
-                        )}
-
-                        <div className="mt-8 space-y-4">
-                            <div className="rounded border border-[#2B2450] bg-black/20 p-4">
-                                <p className="text-[10px] font-bold text-[#8D83B2] uppercase tracking-[0.2em] mb-2">User ID</p>
-                                <p className="text-xs font-mono text-[#D6D0EF] break-all">{selectedProfileUser.id}</p>
-                            </div>
-
-                            {selectedProfileUser.id !== currentUserId && (
-                                <div className="space-y-3">
-                                    <button
-                                        onClick={() => {
-                                            setActiveChat({ id: selectedProfileUser.id, type: "direct" });
-                                            setSelectedProfileUser(null);
-                                            setSidebarMode(null);
-                                        }}
-                                        className="w-full border border-[#554A80] bg-[#251E42] py-3 text-xs font-bold tracking-[0.2em] text-[#F4F0FF] uppercase hover:bg-[#32275A]"
-                                    >
-                                        Message
-                                    </button>
-
-                                    <div className="pt-4 border-t border-[#2B2450]">
-                                        <h4 className="text-[10px] font-bold text-[#8D83B2] uppercase tracking-widest mb-3">Invite to your Rooms</h4>
-                                        <div className="max-h-32 overflow-y-auto space-y-2 pr-2">
-                                            {data.rooms.filter(r => r.creatorId === currentUserId).length === 0 && (
-                                                <p className="text-[10px] text-[#6E62A3]">You don't own any rooms yet.</p>
-                                            )}
-                                            {data.rooms.filter(r => r.creatorId === currentUserId).map(r => (
-                                                <div key={r.id} className="flex items-center justify-between rounded bg-black/30 p-2">
-                                                    <span className="text-[10px] text-[#D6D0EF]"># {r.name}</span>
-                                                    <button
-                                                        onClick={() => handleInviteToRoom(r.id, selectedProfileUser.id)}
-                                                        className="text-[9px] font-bold text-[#A298C3] uppercase hover:text-emerald-400"
-                                                    >
-                                                        INVITE
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
         </div>
+
+
+
     );
 };
 
