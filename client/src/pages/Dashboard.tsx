@@ -1247,9 +1247,25 @@ const DashboardPage = () => {
                         Search
                     </button>
 
-                    <div className="mt-auto w-full border-t border-[#2B2545] pt-4 text-center">
-                        <p className="text-[8px] tracking-[0.24em] text-[#9087B3] uppercase">Connected</p>
-                        <p className="mt-1 text-[8px] tracking-[0.2em] text-[#635C84]">v1.0.42</p>
+                    <div className="mt-auto w-full border-t border-[#2B2545] pt-6 flex flex-col items-center gap-3">
+                        <div 
+                            className="h-10 w-10 rounded-full border border-[#4B426F] bg-[#1A1534] flex items-center justify-center overflow-hidden cursor-pointer hover:border-[#F1EDFF] transition"
+                            title={session?.user.email}
+                        >
+                            {session?.user.image ? (
+                                <img src={session.user.image} alt="User" className="h-full w-full object-cover" />
+                            ) : (
+                                <span className="text-[11px] font-bold text-[#EDE7FF]">
+                                    {getAvatarToken(session?.user.name)}
+                                </span>
+                            )}
+                        </div>
+                        <div className="text-center">
+                            <p className="text-[9px] font-bold tracking-[0.1em] text-[#D6D0EF] truncate max-w-[80px]">
+                                {session?.user.name?.split(' ')[0] || "User"}
+                            </p>
+                            <p className="text-[7px] tracking-[0.2em] text-[#635C84] uppercase mt-0.5">Connected</p>
+                        </div>
                     </div>
                 </aside>
 

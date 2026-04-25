@@ -34,6 +34,6 @@ export const getBearerToken = () => localStorage.getItem("bearer_token");
 export const signInWithGoogle = async () => {
     await signIn.social({
         provider: "google",
-        callbackURL: "/dashboard",
+        callbackURL: "http://localhost:5173/dashboard",
     });
 };
