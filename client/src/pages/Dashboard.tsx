@@ -1248,7 +1248,7 @@ const DashboardPage = () => {
                     </button>
 
                     <div className="mt-auto w-full border-t border-[#2B2545] pt-6 flex flex-col items-center gap-3">
-                        <div 
+                        <div
                             className="h-10 w-10 rounded-full border border-[#4B426F] bg-[#1A1534] flex items-center justify-center overflow-hidden cursor-pointer hover:border-[#F1EDFF] transition"
                             title={session?.user.email}
                         >
@@ -1726,7 +1726,7 @@ const DashboardPage = () => {
                                 )}
 
                                 <div className="flex flex-1 flex-col overflow-hidden">
-                                    <div className="flex-1 space-y-4 overflow-y-auto px-8 py-6">
+                                    <div className="flex-1 space-y-4 overflow-y-auto px-4 py-6">
                                         {messages.length > 0 ? (
                                             messages.map((msg: MessageItem) => {
                                                 const isGeminiGenerated =
